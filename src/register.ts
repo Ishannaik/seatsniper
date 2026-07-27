@@ -20,7 +20,14 @@ const commands = [
     .setDescription("Stop a watch")
     .addIntegerOption((o) =>
       o.setName("id").setDescription("Watch number from /list").setRequired(true)),
-].map((c) => c.toJSON());
+].map((c) => ({
+  ...c.toJSON(),
+  // 0 = install to a guild, 1 = install to a user account.
+  integration_types: [0, 1],
+  // 0 = in a guild, 1 = in the bot's DM, 2 = in any other private channel.
+  // Without this the commands only ever show up inside servers.
+  contexts: [0, 1, 2],
+}));
 
 const rest = new REST().setToken(DISCORD_TOKEN);
 const route = DISCORD_GUILD_ID
