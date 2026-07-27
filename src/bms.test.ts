@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { parseWatchUrl, parseShows, showsOnDate, BmsError } from "./bms.ts";
+import {
+  parseWatchUrl, parseShows, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError,
+} from "./bms.ts";
 
 // Trimmed from a real 2026-07-27 response for The Odyssey (ET00480917, Mumbai).
 // Two shows on the 28th, one on the 27th — the exact shape BMS returns when it
@@ -82,7 +84,33 @@ test("parseShows extracts every show with its real date", () => {
   expect(shows[0]).toEqual({
     sessionId: "14022", availStatus: "3", showDateCode: "20260728",
     showTime: "06:40 AM", attributes: "IMAX",
+    epoch: istToEpoch("202607280640"),
   });
+});
+
+// Discord renders <t:epoch:t> in the reader's own timezone, so the epoch has to be
+// the real instant — 06:40 IST, not 06:40 UTC.
+test("istToEpoch treats the wall clock as IST (UTC+5:30)", () => {
+  const e = istToEpoch("202607280640");
+  expect(new Date(e * 1000).toISOString()).toBe("2026-07-28T01:10:00.000Z");
+});
+
+test("every parsed show carries an epoch matching its date and time", () => {
+  for (const s of parseShows(REAL)) {
+    const iso = new Date(s.epoch * 1000).toISOString();
+    expect(iso.startsWith("20")).toBe(true);
+    expect(Number.isFinite(s.epoch)).toBe(true);
+  }
+});
+
+test("bookable dates exclude the probe date BMS echoes back", () => {
+  const html = `"dateCode":"20260728" "dateCode":"20260729" "dateCode":"${PROBE_DATE}"`;
+  expect(parseBookableDates(html)).toEqual(["20260728", "20260729"]);
+});
+
+test("bookable dates are deduped and sorted", () => {
+  const html = `"dateCode":"20260803" "dateCode":"20260728" "dateCode":"20260728"`;
+  expect(parseBookableDates(html)).toEqual(["20260728", "20260803"]);
 });
 
 test("sessionId is stable across parses, so alerts can't repeat", () => {

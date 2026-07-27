@@ -26,7 +26,18 @@ export type Show = {
   showDateCode: string; // YYYYMMDD
   showTime: string; // "06:40 AM"
   attributes: string; // "IMAX", "" if none
+  /** Unix seconds. Lets Discord render the time in each reader's own locale. */
+  epoch: number;
 };
+
+/** "202607280640" (IST wall clock) -> unix seconds. India is UTC+5:30, no DST. */
+export function istToEpoch(showDateTime: string): number {
+  const [y, mo, d, h, mi] = [
+    +showDateTime.slice(0, 4), +showDateTime.slice(4, 6), +showDateTime.slice(6, 8),
+    +showDateTime.slice(8, 10), +showDateTime.slice(10, 12),
+  ];
+  return Math.floor(Date.UTC(y!, mo! - 1, d!, h!, mi!) / 1000) - 5.5 * 3600;
+}
 
 export type Target = {
   city: string; // "mumbai"
@@ -130,6 +141,13 @@ export function showtimesUrl(t: Target): string {
  * project.
  */
 export async function fetchShowtimes(t: Target): Promise<{ title: string; shows: Show[] }> {
+  const { title, html } = await fetchPage(t);
+  if (!html.includes("showtimesSections")) return { title, shows: [] }; // real page, no shows
+  return { title, shows: parseShows(html) };
+}
+
+/** Fetch + validate a buytickets page. Every caller goes through this. */
+async function fetchPage(t: Target): Promise<{ title: string; html: string }> {
   if (!session) throw new BmsError("unparseable", "initBms() was not called");
 
   let res: any;
@@ -171,9 +189,7 @@ export async function fetchShowtimes(t: Target): Promise<{ title: string; shows:
       `no movie found for ${t.eventCode} in ${t.city} — check the event code`,
     );
   }
-
-  if (!html.includes("showtimesSections")) return { title, shows: [] }; // real page, no shows
-  return { title, shows: parseShows(html) };
+  return { title, html };
 }
 
 /** "The Odyssey Movie Showtimes in Mumbai &amp; …" -> "The Odyssey" */
@@ -190,15 +206,16 @@ export function parseMovieTitle(html: string): string | null {
 /** Exported for tests: the pure half of fetchShows. */
 export function parseShows(html: string): Show[] {
   const re =
-    /"additionalData":\{"sessionId":"(\d+)","availStatus":"(\d+)",[^}]*?"showDateCode":"(\d{8})","showDateTime":"\d+","showTimeCode":"\d+","showTime":"([^"]+)","attributes":"([^"]*)"/g;
+    /"additionalData":\{"sessionId":"(\d+)","availStatus":"(\d+)",[^}]*?"showDateCode":"(\d{8})","showDateTime":"(\d{12})","showTimeCode":"\d+","showTime":"([^"]+)","attributes":"([^"]*)"/g;
   const out: Show[] = [];
   for (const m of html.matchAll(re)) {
     out.push({
       sessionId: m[1]!,
       availStatus: m[2]!,
       showDateCode: m[3]!,
-      showTime: m[4]!,
-      attributes: m[5]!,
+      showTime: m[5]!,
+      attributes: m[6]!,
+      epoch: istToEpoch(m[4]!),
     });
   }
   return out;
@@ -210,6 +227,37 @@ export function parseShows(html: string): Show[] {
  */
 export function showsOnDate(shows: Show[], date: string): Show[] {
   return shows.filter((s) => s.showDateCode === date);
+}
+
+/**
+ * A date BookMyShow will never have shows for. Used as a probe date.
+ *
+ * Why: the page carries a `dateCode` list of every bookable date — but BMS also
+ * injects whatever date you asked for into that list, open or not. Asking for a real
+ * date therefore contaminates the answer. Asking for an impossible one makes the
+ * injected value identifiable, so it can be removed and the rest trusted.
+ *
+ * Verified 2026-07-27: probing with this returns exactly the sets found by scanning
+ * eight days one request at a time — Odyssey {27,28,29 Jul}, Spider-Man
+ * {30,31 Jul, 1,2 Aug}, AoT {28,29 Jul}. One request instead of eight.
+ */
+export const PROBE_DATE = "20991231";
+
+/** Every date this movie is currently bookable for, in this city. One request. */
+export async function fetchBookableDates(
+  t: Omit<Target, "date">,
+): Promise<{ title: string; dates: string[] }> {
+  const { title, html } = await fetchPage({ ...t, date: PROBE_DATE });
+  return { title, dates: parseBookableDates(html) };
+}
+
+/** Exported for tests: the pure half of fetchBookableDates. */
+export function parseBookableDates(html: string): string[] {
+  const dates = new Set<string>();
+  for (const m of html.matchAll(/"dateCode":"(\d{8})"/g)) {
+    if (m[1] !== PROBE_DATE) dates.add(m[1]!);
+  }
+  return [...dates].sort();
 }
 
 /** "20260730" -> "Thu 30 Jul" */

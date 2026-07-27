@@ -1,16 +1,13 @@
 /** SeatSniper — paste a BookMyShow link, get a DM when that date opens. */
+import { Client, GatewayIntentBits, MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+import * as msg from "./messages.ts";
 import {
-  Client,
-  GatewayIntentBits,
-  EmbedBuilder,
-  MessageFlags,
-  type ChatInputCommandInteraction,
-} from "discord.js";
-import {
-  initBms, closeBms, fetchShowtimes, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError,
+  initBms, closeBms, fetchShowtimes, fetchBookableDates, parseWatchUrl, showsOnDate,
+  showtimesUrl, prettyDate, BmsError,
 } from "./bms.ts";
 import {
   addWatch, listWatches, allWatches, countWatches, removeWatch, markOk, markFail,
+  seenDates, recordSeenDates, isSubscription, SUBSCRIPTION,
   MAX_WATCHES_PER_USER, type Watch,
 } from "./db.ts";
 
@@ -18,30 +15,7 @@ const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) throw new Error("DISCORD_TOKEN missing — copy .env.example to .env");
 
 const POLL_MS = Number(process.env.POLL_INTERVAL_SEC ?? 600) * 1000;
-const RED = 0xe01b24;
-const GREY = 0x6b6b6b;
 
-
-/**
- * Distinct showtimes for display. Several theatres run the same slot, so the raw
- * list repeats times — 51 shows collapse to ~12 distinct ones. We don't capture
- * venue names yet (see roadmap), so listing duplicates would just look broken.
- */
-function distinctTimes(shows: { showTime: string; attributes: string }[], limit = 12): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const s of shows) {
-    const label = `\`${s.showTime}\`${s.attributes ? ` ${s.attributes}` : ""}`;
-    if (seen.has(label)) continue;
-    seen.add(label);
-    if (out.length < limit) out.push(label);
-  }
-  return out;
-}
-
-/** "51 shows across 12 times" reads better than a wall of repeated slots. */
-const showSummary = (n: number, distinct: number) =>
-  `${n} show${n === 1 ? "" : "s"}${distinct < n ? ` across ${distinct} times` : ""}`;
 
 /** "2026-07-30" | "20260730" -> "20260730". Throws on anything else. */
 function normaliseDate(input: string): string {
@@ -64,13 +38,13 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   let target;
   try {
     const parsed = parseWatchUrl(i.options.getString("link", true));
-    const dateOpt = i.options.getString("date");
-    const date = dateOpt ? normaliseDate(dateOpt) : parsed.date;
-    if (!date) {
-      return void i.editReply(
-        "❌ No date. Either paste a link that ends in a date, or pass `date:2026-07-30`.",
-      );
-    }
+    const dateOpt = i.options.getString("date")?.trim();
+    // "any" (or a link with no date and no date option) subscribes to the movie:
+    // ping me every time a NEW date unlocks, rather than watching one date.
+    const wantsAny = dateOpt ? /^(any|all|every|new)$/i.test(dateOpt) : !parsed.date;
+    if (wantsAny) return void (await subscribeToMovie(i, parsed));
+
+    const date = dateOpt ? normaliseDate(dateOpt) : parsed.date!;
     if (date < todayIST()) {
       return void i.editReply(
         `❌ ${prettyDate(date)} has already passed — a watch for it could never fire.`,
@@ -106,16 +80,9 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   }
 
   if (open.length) {
-    const times = distinctTimes(open);
-    return void i.editReply({
-      content: `✅ **${title}** is already bookable on ${prettyDate(target.date)} — no watch needed.`,
-      embeds: [
-        new EmbedBuilder().setColor(RED)
-          .setTitle(showSummary(open.length, times.length) + " open now")
-          .setDescription(times.join(" · "))
-          .setURL(showtimesUrl(target)),
-      ],
-    });
+    return void i.editReply(
+      msg.alreadyOnSale({ title, city: target.city, date: target.date, shows: open, url: showtimesUrl(target) }),
+    );
   }
 
   const id = addWatch({
@@ -124,14 +91,50 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   });
   if (id === null) return void i.editReply("You're already watching that movie and date. `/list` to see it.");
 
-  await i.editReply({
-    embeds: [
-      new EmbedBuilder().setColor(RED).setTitle("🎯 Watching")
-        .setDescription(`**${title}**\n${prettyDate(target.date)} · ${target.city}`)
-        .addFields({ name: "​", value: `Checking every ${POLL_MS / 60000} min — I'll DM you the moment it opens.` })
-        .setFooter({ text: `watch #${id}` }),
-    ],
+  await i.editReply(
+    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000 }),
+  );
+}
+
+/**
+ * Subscribe to a movie rather than a single date. Whatever is bookable right now
+ * becomes the baseline — the user already knows about those — and every date that
+ * appears afterwards gets a DM.
+ */
+async function subscribeToMovie(
+  i: ChatInputCommandInteraction,
+  parsed: { city: string; slug: string; eventCode: string },
+) {
+  if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
+    return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
+  }
+
+  let title, dates;
+  try {
+    ({ title, dates } = await fetchBookableDates(parsed));
+  } catch (e) {
+    const err = e as BmsError;
+    if (err.kind === "not_found") {
+      return void i.editReply(
+        `❌ No movie found for \`${parsed.eventCode}\` in ${parsed.city}. Check the link.`,
+      );
+    }
+    return void i.editReply(
+      `⚠️ Can't reach BookMyShow right now, so I won't save a watch I can't check.\n\`${err.message}\``,
+    );
+  }
+
+  const id = addWatch({
+    user_id: i.user.id, channel_id: i.channelId, city: parsed.city, slug: parsed.slug,
+    event_code: parsed.eventCode, date: SUBSCRIPTION, title,
   });
+  if (id === null) return void i.editReply("You're already subscribed to that movie. `/list` to see it.");
+
+  recordSeenDates(id, dates); // baseline: today's open dates are not "new"
+
+  await i.editReply(
+    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000 }),
+  );
 }
 
 async function cmdList(i: ChatInputCommandInteraction) {
@@ -142,19 +145,7 @@ async function cmdList(i: ChatInputCommandInteraction) {
       flags: MessageFlags.Ephemeral,
     });
   }
-  const body = rows
-    .map((w) => {
-      const health =
-        w.fail_count >= 3 ? `⚠️ can't read BMS (${w.fail_count} fails)`
-        : w.last_ok_at ? `✅ checked ${Math.round((Date.now() / 1000 - w.last_ok_at) / 60)} min ago`
-        : "⏳ not checked yet";
-      return `**#${w.id}** ${w.title}\n${prettyDate(w.date)} · ${w.city} · ${health}`;
-    })
-    .join("\n\n");
-  await i.reply({
-    embeds: [new EmbedBuilder().setColor(RED).setTitle("Your watches").setDescription(body)],
-    flags: MessageFlags.Ephemeral,
-  });
+  await i.reply({ ...msg.watchList(rows), flags: MessageFlags.Ephemeral });
 }
 
 async function cmdStop(i: ChatInputCommandInteraction) {
@@ -168,7 +159,34 @@ async function cmdStop(i: ChatInputCommandInteraction) {
 
 // ---------------------------------------------------------------- poller
 
+/** Subscription poll: announce dates that weren't bookable last time we looked. */
+async function checkSubscription(w: Watch) {
+  let dates;
+  try {
+    dates = (await fetchBookableDates({ city: w.city, slug: w.slug, eventCode: w.event_code })).dates;
+  } catch (e) {
+    markFail(w.id, (e as Error).message);
+    if (w.fail_count + 1 === 3) await dm(w, failEmbed(w, e as Error));
+    return;
+  }
+  markOk(w.id);
+
+  const known = new Set(seenDates(w.id));
+  const fresh = dates.filter((d) => !known.has(d));
+  if (!fresh.length) return;
+
+  const url = showtimesUrl({ city: w.city, slug: w.slug, eventCode: w.event_code, date: fresh[0]! });
+  // Only mark these announced once they actually reached the user. Recording first
+  // would lose the alert permanently if delivery failed.
+  if (await dm(w, msg.newDates({ title: w.title, city: w.city, dates: fresh, url }))) {
+    recordSeenDates(w.id, fresh);
+  } else {
+    console.error(`[watch ${w.id}] undelivered, will retry: ${fresh.join(",")}`);
+  }
+}
+
 async function checkWatch(w: Watch) {
+  if (isSubscription(w)) return void (await checkSubscription(w));
   const target = { city: w.city, slug: w.slug, eventCode: w.event_code, date: w.date };
   let open;
   try {
@@ -183,46 +201,41 @@ async function checkWatch(w: Watch) {
   markOk(w.id);
   if (!open.length) return;
 
-  const times = distinctTimes(open, 15);
-  await dm(
-    w,
-    new EmbedBuilder().setColor(RED).setTitle("🎯 BOOKINGS OPEN")
-      .setURL(showtimesUrl(target))
-      .setDescription(
-        `**${w.title}**\n${prettyDate(w.date)} · ${w.city}\n` +
-          `${showSummary(open.length, times.length)}\n\n${times.join(" · ")}`,
-      )
-      .addFields({ name: "​", value: `**[Book now →](${showtimesUrl(target)})**` })
-      .setFooter({ text: `watch #${w.id} · removed, it's done its job` }),
-  );
-  removeWatch(w.id, w.user_id);
+  // Same rule: a watch is only "done its job" once the user was actually told.
+  const delivered = await dm(w, msg.ticketsLive({
+    title: w.title, city: w.city, date: w.date, shows: open, url: showtimesUrl(target),
+  }));
+  if (delivered) removeWatch(w.id, w.user_id);
+  else console.error(`[watch ${w.id}] undelivered, keeping watch alive to retry`);
 }
 
-const failEmbed = (w: Watch, e: Error) =>
-  new EmbedBuilder().setColor(GREY).setTitle("⚠️ I can't read BookMyShow")
-    .setDescription(
-      `Watch **#${w.id}** (${w.title}) is still active, but 3 checks in a row failed.\n` +
-        "**This is my problem, not “no tickets”.**",
-    )
-    .addFields({ name: "Error", value: `\`${e.message.slice(0, 300)}\`` });
+const failEmbed = (w: Watch, e: Error) => msg.cannotRead({ title: w.title, error: e.message });
 
-/** DM the owner; fall back to the origin channel *and say so*. Never silent. */
-async function dm(w: Watch, embed: EmbedBuilder) {
+/**
+ * DM the owner; fall back to the origin channel *and say so*. Never silent.
+ * Returns whether the message actually reached the user — callers must not retire
+ * a watch or mark a date as announced unless it did, or the alert is lost forever.
+ */
+async function dm(w: Watch, payload: { embeds: unknown[]; components?: unknown[] }): Promise<boolean> {
   try {
     const user = await client.users.fetch(w.user_id);
-    await user.send({ embeds: [embed] });
+    await user.send(payload as never);
+    return true;
   } catch {
     try {
       const ch = await client.channels.fetch(w.channel_id);
       if (ch?.isTextBased() && "send" in ch) {
         await ch.send({
-          content: `<@${w.user_id}> (couldn't DM you — your DMs are closed, so posting here)`,
-          embeds: [embed],
+          content: `<@${w.user_id}> — your DMs are closed, so this is going here instead.`,
+          ...(payload as never as object),
         });
+        return true;
       }
+      console.error(`[watch ${w.id}] channel ${w.channel_id} is not sendable`);
     } catch (e) {
       console.error(`[watch ${w.id}] could not deliver anywhere:`, (e as Error).message);
     }
+    return false;
   }
 }
 
@@ -238,16 +251,8 @@ function todayIST(): string {
  * forever finding nothing. Retire it and say so, rather than leaving it to rot.
  */
 async function expireStale(w: Watch): Promise<boolean> {
-  if (w.date >= todayIST()) return false;
-  await dm(
-    w,
-    new EmbedBuilder().setColor(GREY).setTitle("⌛ Watch expired")
-      .setDescription(
-        `**${w.title}** — ${prettyDate(w.date)} has passed, so this watch can't ever ` +
-          "fire. I've removed it.",
-      )
-      .setFooter({ text: `watch #${w.id}` }),
-  );
+  if (isSubscription(w) || w.date >= todayIST()) return false;
+  await dm(w, msg.watchExpired({ title: w.title, date: w.date }));
   removeWatch(w.id, w.user_id);
   console.log(`[poll] expired watch ${w.id} (${w.date} < ${todayIST()})`);
   return true;

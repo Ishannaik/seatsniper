@@ -34,6 +34,14 @@ db.exec(`
     created_at  INTEGER NOT NULL,
     UNIQUE (user_id, event_code, date)
   );
+
+  -- Which dates a subscription watch (date = '') has already reported. Without
+  -- this it would re-announce the same dates every poll.
+  CREATE TABLE IF NOT EXISTS seen_dates (
+    watch_id  INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+    date_code TEXT    NOT NULL,
+    PRIMARY KEY (watch_id, date_code)
+  );
 `);
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -70,3 +78,16 @@ export const markOk = (id: number) =>
 
 export const markFail = (id: number, err: string) =>
   db.query("UPDATE watches SET fail_count = fail_count + 1, last_error = ? WHERE id = ?").run(err, id);
+
+/** A watch with an empty date is a subscription: tell me whenever a NEW date opens. */
+export const SUBSCRIPTION = "";
+export const isSubscription = (w: Watch) => w.date === SUBSCRIPTION;
+
+export const seenDates = (watchId: number) =>
+  (db.query("SELECT date_code FROM seen_dates WHERE watch_id = ?").all(watchId) as { date_code: string }[])
+    .map((r) => r.date_code);
+
+export function recordSeenDates(watchId: number, dates: string[]): void {
+  const q = db.query("INSERT OR IGNORE INTO seen_dates (watch_id, date_code) VALUES (?, ?)");
+  for (const d of dates) q.run(watchId, d);
+}
