@@ -196,6 +196,46 @@ export function cannotRead(opts: { title: string; error: string }) {
   };
 }
 
+/**
+ * The only message someone reads before they trust the bot with anything.
+ * It answers three questions in order — what does it do, where do I get the link,
+ * what do I type — and stops. No feature tour.
+ */
+export function help() {
+  return {
+    embeds: [
+      sig(new EmbedBuilder(), "Help")
+        .setColor(ARMED)
+        .setTitle("Get a DM the moment tickets go on sale")
+        .setDescription(
+          "Open the movie on BookMyShow, copy the link from your browser or the " +
+            "**Share** button, and paste it below. The link carries the city, so " +
+            "you'll get your own city's theatres.",
+        )
+        .addFields(
+          {
+            name: "Watch one date",
+            value:
+              "```/watch link:<paste> date:2026-07-30```" +
+              "Pings you once when that date opens, then stops.",
+          },
+          {
+            name: "Watch every date",
+            value:
+              "```/watch link:<paste>```" +
+              "Leave the date out. Pings you each time a **new** date opens, " +
+              "until you stop it. Good for a film that isn't out yet.",
+          },
+          {
+            name: "Manage",
+            value: "`/list` — what you're watching\n`/stop id:3` — stop one",
+          },
+        )
+        .setFooter({ text: "Checks every 10 minutes · 5 watches each" }),
+    ],
+  };
+}
+
 export function watchExpired(opts: { title: string; date: string }) {
   return {
     embeds: [

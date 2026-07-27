@@ -141,7 +141,7 @@ async function cmdList(i: ChatInputCommandInteraction) {
   const rows = listWatches(i.user.id);
   if (!rows.length) {
     return void i.reply({
-      content: "No watches yet. Paste a BookMyShow link with `/watch`.",
+      content: "Nothing being watched yet. `/help` shows how to start one.",
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -290,7 +290,8 @@ async function poll() {
 client.on("interactionCreate", async (i) => {
   if (!i.isChatInputCommand()) return;
   try {
-    if (i.commandName === "watch") await cmdWatch(i);
+    if (i.commandName === "help") await i.reply({ ...msg.help(), flags: MessageFlags.Ephemeral });
+    else if (i.commandName === "watch") await cmdWatch(i);
     else if (i.commandName === "list") await cmdList(i);
     else if (i.commandName === "stop") await cmdStop(i);
   } catch (e) {

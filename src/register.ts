@@ -14,6 +14,7 @@ const commands = [
       o.setName("link").setDescription("Paste the BookMyShow movie link").setRequired(true))
     .addStringOption((o) =>
       o.setName("date").setDescription("Date e.g. 2026-07-30, or \"any\" to be told every time a new date opens")),
+  new SlashCommandBuilder().setName("help").setDescription("How SeatSniper works"),
   new SlashCommandBuilder().setName("list").setDescription("Show your active watches"),
   new SlashCommandBuilder()
     .setName("stop")
