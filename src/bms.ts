@@ -251,6 +251,42 @@ export async function fetchBookableDates(
   return { title, dates: parseBookableDates(html) };
 }
 
+/**
+ * Per-cycle request coalescing.
+ *
+ * Every watch — dated or subscription — first asks the same question: which dates is
+ * this movie bookable for in this city? That answer is keyed only by (city, event),
+ * NOT by the watched date, so ten friends watching the same film collapse to one
+ * HTTP request no matter which dates they each picked.
+ *
+ * The map is rebuilt every cycle, so it is a within-tick cache and can never serve a
+ * stale answer across polls.
+ */
+let cycle = new Map<string, Promise<{ title: string; dates: string[] }>>();
+let cycleHits = 0;
+
+export function beginCycle(): void {
+  cycle = new Map();
+  cycleHits = 0;
+}
+
+/** Requests saved by coalescing during the current cycle. */
+export const coalescedCount = () => cycleHits;
+
+export function bookableDatesCached(
+  t: Omit<Target, "date">,
+): Promise<{ title: string; dates: string[] }> {
+  const key = `${t.city}|${t.eventCode}`;
+  const hit = cycle.get(key);
+  if (hit) {
+    cycleHits++;
+    return hit;
+  }
+  const p = fetchBookableDates(t);
+  cycle.set(key, p);
+  return p;
+}
+
 /** Exported for tests: the pure half of fetchBookableDates. */
 export function parseBookableDates(html: string): string[] {
   const dates = new Set<string>();

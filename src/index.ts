@@ -2,8 +2,8 @@
 import { Client, GatewayIntentBits, MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 import * as msg from "./messages.ts";
 import {
-  initBms, closeBms, fetchShowtimes, fetchBookableDates, parseWatchUrl, showsOnDate,
-  showtimesUrl, prettyDate, BmsError,
+  initBms, closeBms, fetchShowtimes, fetchBookableDates, bookableDatesCached, beginCycle,
+  coalescedCount, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError,
 } from "./bms.ts";
 import {
   addWatch, listWatches, allWatches, countWatches, removeWatch, markOk, markFail,
@@ -163,7 +163,7 @@ async function cmdStop(i: ChatInputCommandInteraction) {
 async function checkSubscription(w: Watch) {
   let dates;
   try {
-    dates = (await fetchBookableDates({ city: w.city, slug: w.slug, eventCode: w.event_code })).dates;
+    dates = (await bookableDatesCached({ city: w.city, slug: w.slug, eventCode: w.event_code })).dates;
   } catch (e) {
     markFail(w.id, (e as Error).message);
     if (w.fail_count + 1 === 3) await dm(w, failEmbed(w, e as Error));
@@ -190,6 +190,15 @@ async function checkWatch(w: Watch) {
   const target = { city: w.city, slug: w.slug, eventCode: w.event_code, date: w.date };
   let open;
   try {
+    // Ask the shared, coalesced question first: which dates are bookable at all?
+    // Verified equivalent to matching showDateCode (checked across 3 films x 8 days),
+    // and it lets every watch on this movie share one request regardless of date.
+    const { dates } = await bookableDatesCached(target);
+    if (!dates.includes(w.date)) {
+      markOk(w.id);
+      return;
+    }
+    // It's open — only now spend a second request to get the actual showtimes.
     open = showsOnDate((await fetchShowtimes(target)).shows, w.date);
   } catch (e) {
     markFail(w.id, (e as Error).message);
@@ -261,13 +270,19 @@ async function expireStale(w: Watch): Promise<boolean> {
 async function poll() {
   const watches = allWatches();
   if (!watches.length) return;
-  console.log(`[poll] ${watches.length} watch(es)`);
+  beginCycle(); // fresh coalescing map; never serves an answer across polls
+  const started = Date.now();
   for (const w of watches) {
     if (await expireStale(w)) continue;
     await checkWatch(w);
     // Stagger so we never burst. Cheap insurance against looking automated.
     await Bun.sleep(2000 + Math.random() * 3000);
   }
+  const saved = coalescedCount();
+  console.log(
+    `[poll] ${watches.length} watch(es) in ${Math.round((Date.now() - started) / 1000)}s` +
+      (saved ? ` · ${saved} request(s) saved by coalescing` : ""),
+  );
 }
 
 // ---------------------------------------------------------------- wire-up
