@@ -57,10 +57,38 @@ opened", "new date", and "new show" are all the same three lines of logic.
 
 ```bash
 bun install
+bun pm trust --all       # node-tls-client's postinstall fetches its Go library
 cp .env.example .env     # fill in DISCORD_TOKEN and DISCORD_CLIENT_ID
 bun run commands         # register slash commands
 bun run dev
 ```
+
+## Deployment
+
+Runs on the Oracle VPS under pm2:
+
+```bash
+cd ~/seatsniper
+pm2 start "$HOME/.bun/bin/bun" --name seatsniper --interpreter none --time -- run src/index.ts
+pm2 save                 # persist across reboots (pm2 startup already configured)
+
+pm2 logs seatsniper      # follow
+pm2 restart seatsniper   # after a deploy
+```
+
+Bun auto-loads `.env` from the working directory, so pm2 needs no env wiring.
+
+## Usage
+
+```
+/watch link:<paste a BookMyShow link>  date:2026-07-30
+/list
+/stop id:3
+```
+
+The bot validates the link against the live site immediately, so a broken watch
+fails at creation instead of silently never firing. When the date opens it DMs you
+once and deletes the watch.
 
 ## Research
 

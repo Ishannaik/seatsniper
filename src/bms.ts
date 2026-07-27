@@ -62,12 +62,28 @@ export async function closeBms(): Promise<void> {
 }
 
 /**
- * Pull city/slug/event code (and date, if present) out of a pasted BookMyShow link.
- * The ET code is the only token that survives across BMS's several URL shapes, so it
- * is required; everything else is best-effort. Rejects loudly rather than guessing.
+ * Pull city/event code (and date, if present) out of a pasted BookMyShow link.
+ *
+ * Measured 2026-07-27 against ET00480917: the **slug is ignored** by BookMyShow —
+ * a deliberately wrong slug returns byte-for-byte equivalent results, because the ET
+ * code is authoritative. The **city is not**: the same event on the same date returns
+ * 51 shows for mumbai, 25 for delhi, 10 for pune. So a missing slug is harmless and a
+ * missing city is a hard error — defaulting it would silently watch another city's
+ * theatres.
  */
 export function parseWatchUrl(input: string): Omit<Target, "date"> & { date?: string } {
-  const et = input.match(/\b(ET\d{6,})\b/i)?.[1]?.toUpperCase();
+  // Discord users paste <url> to suppress the link preview; strip that and any
+  // surrounding whitespace or trailing punctuation before matching.
+  const raw = input.trim().replace(/^<|>$/g, "").trim();
+
+  if (!/^(https?:\/\/)?([a-z0-9-]+\.)*bookmyshow\.com\//i.test(raw)) {
+    throw new BmsError(
+      "bad_url",
+      "That's not a bookmyshow.com link. Paste the URL from the movie's page.",
+    );
+  }
+
+  const et = raw.match(/\b(ET\d{6,})\b/i)?.[1]?.toUpperCase();
   if (!et) {
     throw new BmsError(
       "bad_url",
@@ -75,13 +91,28 @@ export function parseWatchUrl(input: string): Omit<Target, "date"> & { date?: st
         "the URL from its page — it contains something like ET00480917.",
     );
   }
-  const path = input.match(/bookmyshow\.com\/movies\/([a-z-]+)\/([a-z0-9-]+)\//i);
-  const date = input.match(/\/(\d{8})(?:[/?#]|$)/)?.[1];
+
+  // Ignore query string and fragment so ?utm_source=… and #anchor can't be mistaken
+  // for path segments.
+  const path = raw.split(/[?#]/)[0]!;
+
+  const city = path.match(/\/movies\/([a-z][a-z-]*)\//i)?.[1]?.toLowerCase();
+  if (!city) {
+    throw new BmsError(
+      "bad_url",
+      "Couldn't tell which city that link is for, and I won't guess — show timings " +
+        "differ per city. Use a link that looks like " +
+        "`.../movies/mumbai/<movie>/buytickets/ET…`.",
+    );
+  }
+
   return {
-    city: path?.[1]?.toLowerCase() ?? "mumbai",
-    slug: path?.[2]?.toLowerCase() ?? "movie",
+    city,
+    // Verified ignored by BookMyShow; kept only because the path shape expects a
+    // segment there. Do not add a lookup to "correct" it.
+    slug: path.match(/\/movies\/[a-z][a-z-]*\/([a-z0-9-]+)\//i)?.[1]?.toLowerCase() ?? "movie",
     eventCode: et,
-    date,
+    date: path.match(/\/(\d{8})\/?$/)?.[1],
   };
 }
 

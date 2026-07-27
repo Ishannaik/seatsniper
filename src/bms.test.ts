@@ -27,6 +27,55 @@ test("parseWatchUrl rejects a link with no event code instead of guessing", () =
   expect(() => parseWatchUrl("https://in.bookmyshow.com/explore/movies-mumbai")).toThrow(BmsError);
 });
 
+// --- URL edge cases -------------------------------------------------------
+const BASE = "in.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727";
+
+test.each([
+  ["https scheme", `https://${BASE}`],
+  ["http scheme", `http://${BASE}`],
+  ["no scheme", BASE],
+  ["www subdomain", "https://www.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727"],
+  ["mobile subdomain", "https://m.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727"],
+  ["trailing slash", `https://${BASE}/`],
+  ["utm query string", `https://${BASE}?utm_source=share&utm_medium=copy`],
+  ["fragment", `https://${BASE}#showtimes`],
+  ["discord <> wrapping", `<https://${BASE}>`],
+  ["surrounding whitespace", `   https://${BASE}   `],
+  ["uppercase event code", `https://${BASE}`.replace("ET00480917", "et00480917")],
+])("parseWatchUrl handles %s", (_label, url) => {
+  const r = parseWatchUrl(url);
+  expect(r.eventCode).toBe("ET00480917");
+  expect(r.city).toBe("mumbai");
+});
+
+test("a query string is never mistaken for the date", () => {
+  expect(parseWatchUrl(`https://${BASE}?ref=20991231`).date).toBe("20260727");
+});
+
+// City changes which theatres exist (mumbai 51 shows, delhi 25, pune 10 for the
+// same event and date), so guessing it would silently watch the wrong city.
+test("parseWatchUrl refuses to guess the city", () => {
+  expect(() =>
+    parseWatchUrl("https://in.bookmyshow.com/buytickets/some-cinema/ET00480917/20260727"),
+  ).toThrow(/city/i);
+});
+
+test("parseWatchUrl keeps the city the user actually gave", () => {
+  expect(parseWatchUrl(`https://${BASE}`.replace("/mumbai/", "/pune/")).city).toBe("pune");
+});
+
+test("parseWatchUrl rejects a non-BookMyShow host", () => {
+  expect(() => parseWatchUrl("https://evil.example.com/movies/mumbai/x/buytickets/ET00480917/20260727"))
+    .toThrow(/bookmyshow/i);
+});
+
+// Slug is verified irrelevant to BMS, so a wrong one must not be an error.
+test("a wrong slug is accepted, because BookMyShow ignores it", () => {
+  const r = parseWatchUrl(`https://${BASE}`.replace("the-odyssey", "nonsense-slug"));
+  expect(r.eventCode).toBe("ET00480917");
+  expect(r.city).toBe("mumbai");
+});
+
 test("parseShows extracts every show with its real date", () => {
   const shows = parseShows(REAL);
   expect(shows).toHaveLength(3);

@@ -24,10 +24,35 @@ const GREY = 0x6b6b6b;
 const titleFromSlug = (slug: string) =>
   slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+/**
+ * Distinct showtimes for display. Several theatres run the same slot, so the raw
+ * list repeats times — 51 shows collapse to ~12 distinct ones. We don't capture
+ * venue names yet (see roadmap), so listing duplicates would just look broken.
+ */
+function distinctTimes(shows: { showTime: string; attributes: string }[], limit = 12): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of shows) {
+    const label = `\`${s.showTime}\`${s.attributes ? ` ${s.attributes}` : ""}`;
+    if (seen.has(label)) continue;
+    seen.add(label);
+    if (out.length < limit) out.push(label);
+  }
+  return out;
+}
+
+/** "51 shows across 12 times" reads better than a wall of repeated slots. */
+const showSummary = (n: number, distinct: number) =>
+  `${n} show${n === 1 ? "" : "s"}${distinct < n ? ` across ${distinct} times` : ""}`;
+
 /** "2026-07-30" | "20260730" -> "20260730". Throws on anything else. */
 function normaliseDate(input: string): string {
-  const d = input.trim().replace(/-/g, "");
+  const d = input.trim().replace(/[-/]/g, "");
   if (!/^\d{8}$/.test(d)) throw new BmsError("bad_url", `Date must look like 2026-07-30, got "${input}"`);
+  const [y, m, day] = [+d.slice(0, 4), +d.slice(4, 6), +d.slice(6, 8)];
+  if (m < 1 || m > 12 || day < 1 || day > 31) {
+    throw new BmsError("bad_url", `"${input}" isn't a real date.`);
+  }
   return d;
 }
 
@@ -46,6 +71,11 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
     if (!date) {
       return void i.editReply(
         "❌ No date. Either paste a link that ends in a date, or pass `date:2026-07-30`.",
+      );
+    }
+    if (date < todayIST()) {
+      return void i.editReply(
+        `❌ ${prettyDate(date)} has already passed — a watch for it could never fire.`,
       );
     }
     target = { city: parsed.city, slug: parsed.slug, eventCode: parsed.eventCode, date };
@@ -71,11 +101,13 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   const title = titleFromSlug(target.slug);
 
   if (open.length) {
+    const times = distinctTimes(open);
     return void i.editReply({
       content: `✅ **${title}** is already bookable on ${prettyDate(target.date)} — no watch needed.`,
       embeds: [
-        new EmbedBuilder().setColor(RED).setTitle(`${open.length} shows open now`)
-          .setDescription(open.slice(0, 12).map((s) => `\`${s.showTime}\` ${s.attributes}`).join(" · "))
+        new EmbedBuilder().setColor(RED)
+          .setTitle(showSummary(open.length, times.length) + " open now")
+          .setDescription(times.join(" · "))
           .setURL(showtimesUrl(target)),
       ],
     });
@@ -146,12 +178,15 @@ async function checkWatch(w: Watch) {
   markOk(w.id);
   if (!open.length) return;
 
-  const times = open.slice(0, 15).map((s) => `\`${s.showTime}\`${s.attributes ? ` ${s.attributes}` : ""}`);
+  const times = distinctTimes(open, 15);
   await dm(
     w,
     new EmbedBuilder().setColor(RED).setTitle("🎯 BOOKINGS OPEN")
       .setURL(showtimesUrl(target))
-      .setDescription(`**${w.title}**\n${prettyDate(w.date)} · ${w.city}\n\n${times.join(" · ")}`)
+      .setDescription(
+        `**${w.title}**\n${prettyDate(w.date)} · ${w.city}\n` +
+          `${showSummary(open.length, times.length)}\n\n${times.join(" · ")}`,
+      )
       .addFields({ name: "​", value: `**[Book now →](${showtimesUrl(target)})**` })
       .setFooter({ text: `watch #${w.id} · removed, it's done its job` }),
   );
@@ -186,11 +221,39 @@ async function dm(w: Watch, embed: EmbedBuilder) {
   }
 }
 
+/** YYYYMMDD for today in IST — BookMyShow's dates are Indian local dates. */
+function todayIST(): string {
+  const ist = new Date(Date.now() + 5.5 * 3600_000); // UTC+5:30, no DST in India
+  return ist.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+/**
+ * A watch whose date has passed can never fire — BookMyShow stops listing the date
+ * entirely and silently serves the next bookable one, so the watch would poll
+ * forever finding nothing. Retire it and say so, rather than leaving it to rot.
+ */
+async function expireStale(w: Watch): Promise<boolean> {
+  if (w.date >= todayIST()) return false;
+  await dm(
+    w,
+    new EmbedBuilder().setColor(GREY).setTitle("⌛ Watch expired")
+      .setDescription(
+        `**${w.title}** — ${prettyDate(w.date)} has passed, so this watch can't ever ` +
+          "fire. I've removed it.",
+      )
+      .setFooter({ text: `watch #${w.id}` }),
+  );
+  removeWatch(w.id, w.user_id);
+  console.log(`[poll] expired watch ${w.id} (${w.date} < ${todayIST()})`);
+  return true;
+}
+
 async function poll() {
   const watches = allWatches();
   if (!watches.length) return;
   console.log(`[poll] ${watches.length} watch(es)`);
   for (const w of watches) {
+    if (await expireStale(w)) continue;
     await checkWatch(w);
     // Stagger so we never burst. Cheap insurance against looking automated.
     await Bun.sleep(2000 + Math.random() * 3000);
