@@ -1,7 +1,8 @@
 # BookMyShow Access — Measured Findings
 
 **Date:** 2026-07-27
-**Status:** Resolved. Closes the spike in §14 of the design spec.
+**Status:** Resolved — both access *and* showtimes parsing. Closes §14 of the design
+spec entirely.
 
 Every row below was measured, not inferred. Nothing here is from documentation or
 from another project's README.
@@ -117,8 +118,77 @@ lat/long, `AllowSales` flags. The 2023-era endpoint still works in 2026.
 app sends and we don't. No prior-art project uses it. Worth probing before writing the
 showtimes fetcher.
 
-Still unresolved: **how showtimes are fetched.** That remains the one open question
-from §14 of the design spec. Access is solved; parsing is not.
+**`x-app-code` is a dead end.** Sending it returns 403 — but so does sending *any*
+custom header, because it breaks fingerprint consistency (§2). The header's value was
+never tested; the request never got that far. Do not retry without solving header
+injection first.
+
+---
+
+## 4b. Showtimes — RESOLVED
+
+Showtimes are **server-rendered into the buytickets HTML**. No separate API, no
+headless browser, no `__NEXT_DATA__`. The 2019-era `var UAPI = JSON.parse(…)` container
+that `book-my-show-notification` depends on **no longer exists** — that project is
+broken against current BookMyShow regardless of blocking.
+
+Page: `GET /movies/{city}/{slug}/buytickets/{ET_CODE}/{YYYYMMDD}`
+
+Each showtime appears under `showtimesSections[].showtimes[]` with an
+`additionalData` block:
+
+```json
+{"sessionId":"14022","availStatus":"3","cutOffDateTime":"202607280655",
+ "cutOffDateTimeEpoch":"1785201900","showDateCode":"20260728",
+ "showDateTime":"202607280640","showTimeCode":"0640",
+ "showTime":"06:40 AM","attributes":"IMAX"}
+```
+
+Also present per show: `screenAttr` ("IMAX"), a format string
+(`"English • IMAX 2D | IMAX"`), category/price widgets, and `styleId`
+(`"green-pill-with-border"`).
+
+### The availability signal
+
+**BookMyShow silently serves the nearest bookable date when the requested one isn't
+open.** The URL, the HTTP status, and `showtimesByEvent.currentDateCode` all echo the
+date you asked for — only the show objects reveal the substitution.
+
+The detector is therefore a field comparison, not a heuristic:
+
+> A date is bookable **iff at least one parsed show has
+> `showDateCode === requestedDate`.**
+
+Validated live against The Odyssey (`ET00480917`, Mumbai) on 2026-07-27:
+
+| Requested | Shows parsed | Matching date | Dates served | Verdict |
+|---|---|---|---|---|
+| 20260727 (Mon, today) | 34 | 34 | 20260727 | ✅ bookable |
+| 20260728 (Tue) | 51 | 51 | 20260728 | ✅ bookable |
+| 20260729 (Wed) | 51 | 51 | 20260729 | ✅ bookable |
+| 20260730 (Thu) | 34 | **0** | 20260727 | ❌ not open |
+| 20260731 (Fri) | 34 | **0** | 20260727 | ❌ not open |
+| 20260803 (Mon) | 34 | **0** | 20260727 | ❌ not open |
+
+Confirmed against ground truth — the user independently reported Thursday the 30th
+was unavailable when trying to book.
+
+`Bookmyshow_moviealert` built a statistical approximation of this exact fact —
+"is the target date the most frequent `20\d{6}` token, appearing ≥10 times?" — because
+it never located the field. We read the value BookMyShow itself uses.
+
+### Consequences
+
+- **`sessionId` is the stable per-show ID** the design spec's §6 requires. Show id
+  becomes `bms|{sessionId}`; no composite fallback needed.
+- **`attributes` / `screenAttr` gives screen format** (IMAX, 4DX) for free — the
+  screen-type filter needs no extra request.
+- **`availStatus` and `cutOffDateTime`** are already present, which is most of the
+  seat-availability roadmap item.
+- **Parsing must throw when `showtimesSections` is absent.** That string missing means
+  blocked or reshaped — never "no shows". This is §9's rule at the exact place it
+  matters: a fallback page is a *valid-looking* 200 with 34 real shows for the wrong
+  date.
 
 ---
 
