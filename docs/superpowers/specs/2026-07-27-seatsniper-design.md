@@ -1,8 +1,18 @@
 # SeatSniper — Design Spec
 
 **Date:** 2026-07-27
-**Status:** Approved, pending provider spike
+**Status:** Approved. Access spike resolved — see
+[BMS Access Findings](2026-07-27-bms-access-findings.md). Showtimes parsing still open.
 **Repo:** https://github.com/Ishannaik/seatsniper (private)
+
+> **Amendments since first draft** (details in the findings doc):
+> - **Scope narrowed to one feature and one user.** MVP is: paste a BookMyShow link,
+>   get a DM when bookings open. Single user for now; multi-user is planned later.
+> - **Watch creation is a pasted URL**, not autocomplete pickers — this removes movie
+>   search, city and venue lookup from the MVP entirely.
+> - **Deployment is Oracle Cloud VPS**, not a home machine. §13 is superseded.
+> - **All HTTP goes through `node-tls-client` with a Safari profile.** Never Chrome.
+> - **Polling baseline is 10 min, adaptive**, not a flat 5 min.
 
 ---
 
@@ -482,46 +492,69 @@ process refuses to boot with a missing required variable rather than failing at 
 
 ## 13. Deployment
 
-**Constraint:** BookMyShow geo-fences to India and blocks datacenter IPs. This rules out
-the obvious free options — Vercel, US-region Fly.io, GitHub Actions runners — unless a
-proxy is added, which costs money and adds a failure mode.
+**Superseded by measurement.** The original plan assumed datacenter IPs were blocked and
+that a home machine was required. That assumption was tested and proved false — see
+[BMS Access Findings](2026-07-27-bms-access-findings.md).
 
-**MVP plan:** run the process on an always-on machine with an Indian residential or
-India-region IP. In order of preference:
+**Actual plan: the existing Oracle Cloud VPS.** Verified returning 200 with real JSON,
+10/10 consecutive requests, median 48 ms, from a datacenter IP. The block was a TLS
+fingerprint, not the IP.
 
-1. **Local machine / home server** — free, correct IP, fine for a single user. Start here.
-2. **Oracle Cloud Free Tier ARM instance, Mumbai region** — genuinely free, always-on,
-   Indian IP. The upgrade path when it needs to outlive a laptop.
-3. Any India-region VPS (~₹350/month) if free tiers prove unreliable.
+| | |
+|---|---|
+| Host | Oracle Cloud VPS (already provisioned) |
+| Process | one Bun process, systemd unit, restart on failure |
+| HTTP client | `node-tls-client`, `clientIdentifier: safari_ios_18_0` |
+| Storage | `seatsniper.db` on local disk |
+| Home IP | never used |
+| Proxy | none |
+| **Cost** | **₹0** |
 
-Bun compiles to a single executable (`bun build --compile`), so deployment is: copy one
-binary plus `.env` plus the `.db` file. No runtime install.
+Bun compiles to a single executable (`bun build --compile`), so deployment is one binary
+plus `.env` plus the `.db` file. The `node-tls-client` Go shared library must be present
+alongside it, and `bun pm trust --all` is required for its postinstall.
 
-**Cost at MVP scale: ₹0.** No managed database, no queue, no proxy service.
+**Rejected:** home PC (gets switched off), Raspberry Pi (32-bit armhf, no Bun build, old
+TLS stack → 403), phone via Termux (403 on every profile), and every paid scraping API
+(ScraperAPI needs a ~$299/mo tier for India geotargeting; the rest are 40–400 requests a
+month after residential multipliers). The free path measured better than the paid ones.
 
 ---
 
-## 14. The spike — the one open question
+## 14. The spike
 
-Everything above is settled except *how showtimes are actually fetched*. Before writing
+### Resolved
+
+- **Can we reach BookMyShow at all, 24/7, for free?** Yes. Oracle VPS +
+  `node-tls-client` with a Safari profile. 10/10 at 200, median 48 ms.
+- **Do the 2023-era endpoints still work in 2026?** `discover/regions` does —
+  200, 709,354 bytes of real JSON, `RegionCode: "MUMBAI"`, 10 cities.
+- **Is a headless browser needed?** No. Cloudflare serves the JSON to a correct TLS
+  fingerprint without any JS execution.
+
+Full matrix in [BMS Access Findings](2026-07-27-bms-access-findings.md).
+
+### Still open
+
+**How showtimes are fetched.** Access is solved; parsing is not. Before writing
 `providers/bms/shows.ts`:
 
-1. Open a BookMyShow cinema showtimes page in Chrome DevTools from an Indian connection.
-2. Read the Network tab. Determine which of these is true:
-   - **(a)** A clean JSON endpoint returns showtimes → best case, use it directly.
-   - **(b)** Data is server-rendered into an inline script (`UAPI`, `__NEXT_DATA__`, or
-     similar) → parse that, and pin the extraction to a named key rather than a loose regex.
-   - **(c)** Rendered client-side behind bot protection → the only case that justifies a
-     headless browser, which changes the hosting story.
-3. Verify the two lookup endpoints from §3.1 still respond in 2026 — that code is from 2023.
-4. Confirm a **stable per-show identifier** exists in the response (see §6).
+1. From the Oracle box, fetch a real cinema/buytickets page through `node-tls-client`
+   and determine which is true:
+   - **(a)** A JSON endpoint returns showtimes → use it directly.
+   - **(b)** Server-rendered into an inline script (`UAPI`, `__NEXT_DATA__`) → parse
+     that, pinned to a named key rather than a loose regex.
+   - **(c)** Client-rendered → the only case that justifies a headless browser.
+2. **Probe the `x-app-code` header.** BookMyShow's own 500 response
+   (`Null Value Returned for Field: x-app-code`) names a header its app sends and no
+   prior-art project uses. It may unlock cleaner endpoints than HTML scraping.
+3. Work out the correct `venues` parameters — the documented form currently 400s.
+4. Confirm a **stable per-show identifier** exists (see §6). Without one, alerts repeat
+   every poll.
 5. Capture one real response body and commit it as a test fixture.
 
-**Deliverable:** a short findings note appended to this spec, plus the fixture. Only then
-does provider code get written.
-
-Timebox: one session. If (c) turns out to be true, that is a design change worth
-discussing before proceeding, not something to absorb silently.
+Timebox: one session. If (c) turns out to be true, that changes the hosting story and is
+worth discussing rather than absorbing silently.
 
 ---
 
