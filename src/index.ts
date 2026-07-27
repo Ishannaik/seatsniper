@@ -7,7 +7,7 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import {
-  initBms, closeBms, fetchShows, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError,
+  initBms, closeBms, fetchShowtimes, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError,
 } from "./bms.ts";
 import {
   addWatch, listWatches, allWatches, countWatches, removeWatch, markOk, markFail,
@@ -21,8 +21,6 @@ const POLL_MS = Number(process.env.POLL_INTERVAL_SEC ?? 600) * 1000;
 const RED = 0xe01b24;
 const GREY = 0x6b6b6b;
 
-const titleFromSlug = (slug: string) =>
-  slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 /**
  * Distinct showtimes for display. Several theatres run the same slot, so the raw
@@ -89,16 +87,23 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
 
   // Validate against the live site now, so a broken watch fails here rather than
   // silently never firing. Costs one request; saves days of false silence.
-  let open;
+  let open, title;
   try {
-    open = showsOnDate(await fetchShows(target), target.date);
+    const res = await fetchShowtimes(target);
+    title = res.title; // BookMyShow's own name for it, not a guess from the slug
+    open = showsOnDate(res.shows, target.date);
   } catch (e) {
+    const err = e as BmsError;
+    if (err.kind === "not_found") {
+      return void i.editReply(
+        `❌ No movie found for \`${target.eventCode}\` in ${target.city}. ` +
+          "Check the link — the city and the event code have to match.",
+      );
+    }
     return void i.editReply(
-      `⚠️ Can't reach BookMyShow right now, so I won't save a watch I can't check.\n\`${(e as Error).message}\``,
+      `⚠️ Can't reach BookMyShow right now, so I won't save a watch I can't check.\n\`${err.message}\``,
     );
   }
-
-  const title = titleFromSlug(target.slug);
 
   if (open.length) {
     const times = distinctTimes(open);
@@ -167,7 +172,7 @@ async function checkWatch(w: Watch) {
   const target = { city: w.city, slug: w.slug, eventCode: w.event_code, date: w.date };
   let open;
   try {
-    open = showsOnDate(await fetchShows(target), w.date);
+    open = showsOnDate((await fetchShowtimes(target)).shows, w.date);
   } catch (e) {
     markFail(w.id, (e as Error).message);
     // One warning at exactly 3 consecutive failures: enough to rule out a blip,

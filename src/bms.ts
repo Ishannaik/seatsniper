@@ -38,7 +38,7 @@ export type Target = {
 /** Anything that is not a confident, parsed answer. Never swallowed into `[]`. */
 export class BmsError extends Error {
   constructor(
-    readonly kind: "network" | "blocked" | "unparseable" | "bad_url",
+    readonly kind: "network" | "blocked" | "unparseable" | "bad_url" | "not_found",
     message: string,
   ) {
     super(message);
@@ -121,12 +121,15 @@ export function showtimesUrl(t: Target): string {
 }
 
 /**
- * Every showtime BookMyShow rendered for this page, whatever date they belong to.
- * Throws rather than returning [] whenever the page is not recognisably a
- * showtimes page — a Cloudflare block is a 200 with a plausible HTML body, and
- * treating that as "no shows" is the bug that silently kills every similar project.
+ * The movie's real name plus every showtime BookMyShow rendered for this page,
+ * whatever date those shows belong to.
+ *
+ * Throws rather than returning empty whenever the page is not recognisably a real
+ * BookMyShow movie page — a Cloudflare block is a 200 with a plausible HTML body,
+ * and treating that as "no shows" is the bug that silently kills every similar
+ * project.
  */
-export async function fetchShows(t: Target): Promise<Show[]> {
+export async function fetchShowtimes(t: Target): Promise<{ title: string; shows: Show[] }> {
   if (!session) throw new BmsError("unparseable", "initBms() was not called");
 
   let res: any;
@@ -140,13 +143,48 @@ export async function fetchShows(t: Target): Promise<Show[]> {
   if (res.status !== 200) {
     throw new BmsError("blocked", `HTTP ${res.status} (${html.length} bytes)`);
   }
-  if (!html.includes("showtimesSections")) {
+
+  // Distinguish "a real BookMyShow page that happens to list nothing" from "we were
+  // blocked / the page reshaped". Both are HTTP 200 with HTML, so size or a missing
+  // showtimes key alone cannot tell them apart — a Cloudflare block is ~5.5KB, while
+  // a genuine page for a date with no shows is ~118KB.
+  //
+  // __INITIAL_STATE__ is the app's own hydration payload: present on every real BMS
+  // page, absent from every block/challenge page. Identify the page positively first,
+  // THEN allow an empty result. This is not a fallback — an unidentified page still
+  // throws.
+  if (!html.includes("window.__INITIAL_STATE__")) {
     throw new BmsError(
       "blocked",
-      `no showtimesSections in ${html.length} bytes — blocked or page reshaped`,
+      `not a BookMyShow app page (${html.length} bytes, no __INITIAL_STATE__) — blocked or reshaped`,
     );
   }
-  return parseShows(html);
+  // A real event always titles its page "<Movie> Movie Showtimes in <City>".
+  // A nonexistent event code renders a page with no <title> at all. Verified against
+  // ET99999999 (no title) vs ET00000001 (an obscure old film — has a title, zero
+  // shows). So "no title" means the code is wrong, which is worth telling the user
+  // now rather than letting them wait forever for an alert that cannot come.
+  const title = parseMovieTitle(html);
+  if (!title) {
+    throw new BmsError(
+      "not_found",
+      `no movie found for ${t.eventCode} in ${t.city} — check the event code`,
+    );
+  }
+
+  if (!html.includes("showtimesSections")) return { title, shows: [] }; // real page, no shows
+  return { title, shows: parseShows(html) };
+}
+
+/** "The Odyssey Movie Showtimes in Mumbai &amp; …" -> "The Odyssey" */
+export function parseMovieTitle(html: string): string | null {
+  const raw = html.match(/<title>([^<]+)<\/title>/i)?.[1];
+  if (!raw) return null;
+  const name = raw.split(/ Movie Showtimes/i)[0]!.trim();
+  if (!name || name.length > 120) return null;
+  return name
+    .replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
 /** Exported for tests: the pure half of fetchShows. */
