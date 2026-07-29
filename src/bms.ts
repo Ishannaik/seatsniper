@@ -290,9 +290,9 @@ export const PROBE_DATE = "20991231";
 /** Every date this movie is currently bookable for, in this city. One request. */
 export async function fetchBookableDates(
   t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[] }> {
+): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] }> {
   const { title, html } = await fetchPage({ ...t, date: PROBE_DATE });
-  return { title, dates: parseBookableDates(html) };
+  return { title, dates: parseBookableDates(html), venues: parseVenues(html) };
 }
 
 /**
@@ -306,7 +306,7 @@ export async function fetchBookableDates(
  * The map is rebuilt every cycle, so it is a within-tick cache and can never serve a
  * stale answer across polls.
  */
-let cycle = new Map<string, Promise<{ title: string; dates: string[] }>>();
+let cycle = new Map<string, Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] }>>();
 let cycleHits = 0;
 
 export function beginCycle(): void {
@@ -319,7 +319,7 @@ export const coalescedCount = () => cycleHits;
 
 export function bookableDatesCached(
   t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[] }> {
+): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] }> {
   const key = `${t.city}|${t.eventCode}`;
   const hit = cycle.get(key);
   if (hit) {
