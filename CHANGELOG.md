@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-30
+
 ### Added
 
-- New cinema alerts on subscriptions — notify when a new theatre or show format appears for a subscribed movie (in progress on `feature/new-cinema-alerts`).
+- New cinema alerts on subscriptions — DM when a new theatre appears for a subscribed movie (`seen_venues` ledger).
+- `AGENTS.md` / `CLAUDE.md` project context for coding agents.
+- Changelog, release docs, and GitHub release note categories.
+
+### Fixed
+
+- Probe fetch hardening so venue-parse failures do not break dated watches.
 
 ## [0.1.0] - 2026-07-29
 
@@ -33,5 +41,6 @@ First public release. Discord bot that watches BookMyShow and DMs you when booki
 
 - Redesigned all Discord messages and embeds when subscriptions were added.
 
-[Unreleased]: https://github.com/Ishannaik/seatsniper/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Ishannaik/seatsniper/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Ishannaik/seatsniper/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Ishannaik/seatsniper/releases/tag/v0.1.0
