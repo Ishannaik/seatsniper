@@ -30,7 +30,7 @@ src/
   index.ts      bot + poll loop + slash handlers
   bms.ts        BookMyShow client, URL parse, availability
   bms.test.ts
-  db.ts         SQLite watches + seen_dates + seen_venues + seen_venues
+  db.ts         SQLite watches + seen_dates + seen_venues
   messages.ts   Discord copy / embeds
   register.ts   slash command registration
 docs/superpowers/specs/   design + measured BMS findings
