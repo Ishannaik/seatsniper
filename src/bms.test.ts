@@ -1,16 +1,26 @@
 import { expect, test } from "bun:test";
 import {
-  parseWatchUrl, parseShows, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError,
+  parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError,
 } from "./bms.ts";
 
 // Trimmed from a real 2026-07-27 response for The Odyssey (ET00480917, Mumbai).
 // Two shows on the 28th, one on the 27th — the exact shape BMS returns when it
 // substitutes the nearest bookable date for one that isn't open.
 const REAL = `
-"showtimesSections":[{"showtimes":[{"title":"06:40 AM","screenAttr":"IMAX",
+"showtimesSections":[{"data":[{"type":"venue-card","additionalData":{"venueCode":"PVRJ","venueName":"PVR: Juhu"},
+"showtimes":[{"title":"06:40 AM","screenAttr":"IMAX",
 "additionalData":{"sessionId":"14022","availStatus":"3","cutOffDateTime":"202607280655","cutOffDateTimeEpoch":"1785201900","showDateCode":"20260728","showDateTime":"202607280640","showTimeCode":"0640","showTime":"06:40 AM","attributes":"IMAX"},
 "additionalData":{"sessionId":"14023","availStatus":"1","cutOffDateTime":"202607281010","cutOffDateTimeEpoch":"1785201901","showDateCode":"20260728","showDateTime":"202607280955","showTimeCode":"0955","showTime":"09:55 AM","attributes":"IMAX"},
-"additionalData":{"sessionId":"13919","availStatus":"3","cutOffDateTime":"202607271400","cutOffDateTimeEpoch":"1785141000","showDateCode":"20260727","showDateTime":"202607271345","showTimeCode":"1345","showTime":"01:45 PM","attributes":"IMAX"}]}]`;
+"additionalData":{"sessionId":"13919","availStatus":"3","cutOffDateTime":"202607271400","cutOffDateTimeEpoch":"1785141000","showDateCode":"20260727","showDateTime":"202607271345","showTimeCode":"1345","showTime":"01:45 PM","attributes":"IMAX"}]}]}]`;
+
+const VENUE_HTML = `
+"data":[{"type":"venue-card","additionalData":{"venueCode":"MCIW","venueName":"Miraj Cinemas: IMAX, Wadala"},
+"showtimes":[{"title":"04:30 PM","screenAttr":"IMAX",
+"additionalData":{"sessionId":"19229","availStatus":"3","cutOffDateTime":"202607300500","cutOffDateTimeEpoch":"1","showDateCode":"20260730","showDateTime":"202607300430","showTimeCode":"0430","showTime":"04:30 PM","attributes":"IMAX"}}]},
+{"type":"venue-card","additionalData":{"venueCode":"IMOB","venueName":"INOX Megaplex: Sky City Mall, Borivali"},
+"showtimes":[{"title":"04:45 PM","screenAttr":"IMAX",
+"additionalData":{"sessionId":"19230","availStatus":"3","cutOffDateTime":"202607300515","cutOffDateTimeEpoch":"1","showDateCode":"20260730","showDateTime":"202607300445","showTimeCode":"0445","showTime":"04:45 PM","attributes":"IMAX"}}]}]
+`;
 
 test("parseWatchUrl pulls city, slug, event code and date", () => {
   const r = parseWatchUrl(
@@ -85,7 +95,41 @@ test("parseShows extracts every show with its real date", () => {
     sessionId: "14022", availStatus: "3", showDateCode: "20260728",
     showTime: "06:40 AM", attributes: "IMAX",
     epoch: istToEpoch("202607280640"),
+    venueCode: "PVRJ", venueName: "PVR: Juhu",
   });
+});
+
+test("parseShows lifts venueCode/venueName from venue-card parent", () => {
+  const shows = parseShows(VENUE_HTML);
+  expect(shows).toHaveLength(2);
+  expect(shows[0]).toMatchObject({
+    sessionId: "19229", venueCode: "MCIW", venueName: "Miraj Cinemas: IMAX, Wadala",
+    showDateCode: "20260730", attributes: "IMAX",
+  });
+  expect(shows[1]).toMatchObject({ sessionId: "19230", venueCode: "IMOB" });
+});
+
+test("parseVenues returns unique codes with names", () => {
+  expect(parseVenues(VENUE_HTML)).toEqual([
+    { code: "MCIW", name: "Miraj Cinemas: IMAX, Wadala" },
+    { code: "IMOB", name: "INOX Megaplex: Sky City Mall, Borivali" },
+  ]);
+});
+
+// Legacy flat showtimesSections tree — sessions present but no venue-cards means
+// the page reshaped; must throw, not return [] or silently drop venue data.
+const FLAT_SHOWTIMES = `
+"showtimesSections":[{"showtimes":[{"title":"06:40 AM","screenAttr":"IMAX",
+"additionalData":{"sessionId":"14022","availStatus":"3","cutOffDateTime":"202607280655","cutOffDateTimeEpoch":"1785201900","showDateCode":"20260728","showDateTime":"202607280640","showTimeCode":"0640","showTime":"06:40 AM","attributes":"IMAX"}}]}]`;
+
+test("parseShows throws unparseable when showtimesSections has sessions but no venue-cards", () => {
+  try {
+    parseShows(FLAT_SHOWTIMES);
+    expect.unreachable();
+  } catch (e) {
+    expect(e).toBeInstanceOf(BmsError);
+    expect((e as BmsError).kind).toBe("unparseable");
+  }
 });
 
 // Discord renders <t:epoch:t> in the reader's own timezone, so the epoch has to be

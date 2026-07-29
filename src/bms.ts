@@ -28,6 +28,8 @@ export type Show = {
   attributes: string; // "IMAX", "" if none
   /** Unix seconds. Lets Discord render the time in each reader's own locale. */
   epoch: number;
+  venueCode: string;
+  venueName: string;
 };
 
 /** "202607280640" (IST wall clock) -> unix seconds. India is UTC+5:30, no DST. */
@@ -203,12 +205,12 @@ export function parseMovieTitle(html: string): string | null {
     .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
-/** Exported for tests: the pure half of fetchShows. */
-export function parseShows(html: string): Show[] {
-  const re =
-    /"additionalData":\{"sessionId":"(\d+)","availStatus":"(\d+)",[^}]*?"showDateCode":"(\d{8})","showDateTime":"(\d{12})","showTimeCode":"\d+","showTime":"([^"]+)","attributes":"([^"]*)"/g;
+const SESSION_RE =
+  /"additionalData":\{"sessionId":"(\d+)","availStatus":"(\d+)",[^}]*?"showDateCode":"(\d{8})","showDateTime":"(\d{12})","showTimeCode":"\d+","showTime":"([^"]+)","attributes":"([^"]*)"/g;
+
+function parseSessionsInSlice(slice: string, venueCode: string, venueName: string): Show[] {
   const out: Show[] = [];
-  for (const m of html.matchAll(re)) {
+  for (const m of slice.matchAll(SESSION_RE)) {
     out.push({
       sessionId: m[1]!,
       availStatus: m[2]!,
@@ -216,7 +218,49 @@ export function parseShows(html: string): Show[] {
       showTime: m[5]!,
       attributes: m[6]!,
       epoch: istToEpoch(m[4]!),
+      venueCode,
+      venueName,
     });
+  }
+  return out;
+}
+
+/** Exported for tests: the pure half of fetchShows. */
+export function parseShows(html: string): Show[] {
+  const marker = '"type":"venue-card"';
+  const out: Show[] = [];
+  let pos = 0;
+  let venueCards = 0;
+
+  while (true) {
+    const start = html.indexOf(marker, pos);
+    if (start === -1) break;
+    venueCards++;
+    const next = html.indexOf(marker, start + marker.length);
+    const slice = next === -1 ? html.slice(start) : html.slice(start, next);
+    const venueCode = slice.match(/"venueCode":"([^"]+)"/)?.[1] ?? "";
+    const venueName = slice.match(/"venueName":"([^"]+)"/)?.[1] ?? "";
+    out.push(...parseSessionsInSlice(slice, venueCode, venueName));
+    pos = start + marker.length;
+  }
+
+  if (out.length > 0) return out;
+
+  const hasSessions = /"sessionId":"\d+"/.test(html);
+  if (html.includes("showtimesSections") && venueCards === 0 && hasSessions) {
+    throw new BmsError("unparseable", "showtimes page has sessions but no venue-cards");
+  }
+
+  return [];
+}
+
+export function parseVenues(html: string): { code: string; name: string }[] {
+  const out: { code: string; name: string }[] = [];
+  const seen = new Set<string>();
+  for (const s of parseShows(html)) {
+    if (!s.venueCode || seen.has(s.venueCode)) continue;
+    seen.add(s.venueCode);
+    out.push({ code: s.venueCode, name: s.venueName });
   }
   return out;
 }
@@ -243,12 +287,20 @@ export function showsOnDate(shows: Show[], date: string): Show[] {
  */
 export const PROBE_DATE = "20991231";
 
-/** Every date this movie is currently bookable for, in this city. One request. */
+/** Every date this movie is currently bookable for, in this city. One request.
+ *  `venues` is null when venue-cards failed to parse — not the same as []. */
 export async function fetchBookableDates(
   t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[] }> {
+): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }> {
   const { title, html } = await fetchPage({ ...t, date: PROBE_DATE });
-  return { title, dates: parseBookableDates(html) };
+  const dates = parseBookableDates(html);
+  let venues: { code: string; name: string }[] | null = null;
+  try {
+    venues = parseVenues(html);
+  } catch (e) {
+    console.error(`[bms] venue parse failed for ${t.eventCode}/${t.city}:`, (e as Error).message);
+  }
+  return { title, dates, venues };
 }
 
 /**
@@ -262,7 +314,7 @@ export async function fetchBookableDates(
  * The map is rebuilt every cycle, so it is a within-tick cache and can never serve a
  * stale answer across polls.
  */
-let cycle = new Map<string, Promise<{ title: string; dates: string[] }>>();
+let cycle = new Map<string, Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }>>();
 let cycleHits = 0;
 
 export function beginCycle(): void {
@@ -275,7 +327,7 @@ export const coalescedCount = () => cycleHits;
 
 export function bookableDatesCached(
   t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[] }> {
+): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }> {
   const key = `${t.city}|${t.eventCode}`;
   const hit = cycle.get(key);
   if (hit) {

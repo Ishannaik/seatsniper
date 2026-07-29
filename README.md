@@ -82,13 +82,15 @@ Bun auto-loads `.env` from the working directory, so pm2 needs no env wiring.
 
 ```
 /watch link:<paste a BookMyShow link>  date:2026-07-30
+/watch link:<paste a BookMyShow link>  date:any
 /list
 /stop id:3
 ```
 
 The bot validates the link against the live site immediately, so a broken watch
 fails at creation instead of silently never firing. When the date opens it DMs you
-once and deletes the watch.
+once and deletes the watch. Subscriptions (`date:any`) keep watching and ping when
+a new bookable date unlocks or a new cinema starts listing the movie.
 
 ## Research
 

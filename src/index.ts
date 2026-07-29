@@ -3,12 +3,12 @@ import { Client, GatewayIntentBits, MessageFlags, type ChatInputCommandInteracti
 import * as msg from "./messages.ts";
 import {
   initBms, closeBms, fetchShowtimes, fetchBookableDates, bookableDatesCached, beginCycle,
-  coalescedCount, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError,
+  coalescedCount, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError, PROBE_DATE,
 } from "./bms.ts";
 import {
   addWatch, listWatches, allWatches, countWatches, removeWatch, markOk, markFail,
-  seenDates, recordSeenDates, isSubscription, SUBSCRIPTION,
-  MAX_WATCHES_PER_USER, type Watch,
+  seenDates, recordSeenDates, seenVenues, recordSeenVenues, shouldSilentSeedVenues,
+  isSubscription, SUBSCRIPTION, MAX_WATCHES_PER_USER, type Watch,
 } from "./db.ts";
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -109,9 +109,9 @@ async function subscribeToMovie(
     return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
   }
 
-  let title, dates;
+  let title, dates, venues;
   try {
-    ({ title, dates } = await fetchBookableDates(parsed));
+    ({ title, dates, venues } = await fetchBookableDates(parsed));
   } catch (e) {
     const err = e as BmsError;
     if (err.kind === "not_found") {
@@ -131,6 +131,7 @@ async function subscribeToMovie(
   if (id === null) return void i.editReply("You're already subscribed to that movie. `/list` to see it.");
 
   recordSeenDates(id, dates); // baseline: today's open dates are not "new"
+  if (venues) recordSeenVenues(id, venues.map((v) => v.code));
 
   await i.editReply(
     msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000 }),
@@ -159,11 +160,14 @@ async function cmdStop(i: ChatInputCommandInteraction) {
 
 // ---------------------------------------------------------------- poller
 
-/** Subscription poll: announce dates that weren't bookable last time we looked. */
+/** Subscription poll: announce dates and cinemas that weren't bookable last time we looked. */
 async function checkSubscription(w: Watch) {
-  let dates;
+  let dates: string[];
+  let venues: { code: string; name: string }[] | null;
   try {
-    dates = (await bookableDatesCached({ city: w.city, slug: w.slug, eventCode: w.event_code })).dates;
+    ({ dates, venues } = await bookableDatesCached({
+      city: w.city, slug: w.slug, eventCode: w.event_code,
+    }));
   } catch (e) {
     markFail(w.id, (e as Error).message);
     if (w.fail_count + 1 === 3) await dm(w, failEmbed(w, e as Error));
@@ -171,17 +175,37 @@ async function checkSubscription(w: Watch) {
   }
   markOk(w.id);
 
-  const known = new Set(seenDates(w.id));
-  const fresh = dates.filter((d) => !known.has(d));
-  if (!fresh.length) return;
+  // null venues = parse failed; skip cinema diff (don't treat as "no cinemas").
+  let freshVenues: { code: string; name: string }[] = [];
+  if (venues) {
+    if (shouldSilentSeedVenues(w.id)) {
+      recordSeenVenues(w.id, venues.map((v) => v.code));
+    } else {
+      const known = new Set(seenVenues(w.id));
+      freshVenues = venues.filter((v) => !known.has(v.code));
+    }
+  }
 
-  const url = showtimesUrl({ city: w.city, slug: w.slug, eventCode: w.event_code, date: fresh[0]! });
+  const knownDates = new Set(seenDates(w.id));
+  const freshDates = dates.filter((d) => !knownDates.has(d));
+  if (!freshDates.length && !freshVenues.length) return;
+
+  const url = showtimesUrl({
+    city: w.city,
+    slug: w.slug,
+    eventCode: w.event_code,
+    date: freshDates[0] ?? dates[0] ?? PROBE_DATE,
+  });
+
   // Only mark these announced once they actually reached the user. Recording first
   // would lose the alert permanently if delivery failed.
-  if (await dm(w, msg.newDates({ title: w.title, city: w.city, dates: fresh, url }))) {
-    recordSeenDates(w.id, fresh);
+  if (await dm(w, msg.subscriptionAlert({
+    title: w.title, city: w.city, dates: freshDates, venues: freshVenues, url,
+  }))) {
+    if (freshDates.length) recordSeenDates(w.id, freshDates);
+    if (freshVenues.length) recordSeenVenues(w.id, freshVenues.map((v) => v.code));
   } else {
-    console.error(`[watch ${w.id}] undelivered, will retry: ${fresh.join(",")}`);
+    console.error(`[watch ${w.id}] undelivered, will retry`);
   }
 }
 
