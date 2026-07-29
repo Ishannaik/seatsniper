@@ -42,6 +42,12 @@ db.exec(`
     date_code TEXT    NOT NULL,
     PRIMARY KEY (watch_id, date_code)
   );
+
+  CREATE TABLE IF NOT EXISTS seen_venues (
+    watch_id    INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+    venue_code  TEXT    NOT NULL,
+    PRIMARY KEY (watch_id, venue_code)
+  );
 `);
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -90,4 +96,19 @@ export const seenDates = (watchId: number) =>
 export function recordSeenDates(watchId: number, dates: string[]): void {
   const q = db.query("INSERT OR IGNORE INTO seen_dates (watch_id, date_code) VALUES (?, ?)");
   for (const d of dates) q.run(watchId, d);
+}
+
+export const seenVenues = (watchId: number) =>
+  (db.query("SELECT venue_code FROM seen_venues WHERE watch_id = ?").all(watchId) as { venue_code: string }[])
+    .map((r) => r.venue_code);
+
+export function recordSeenVenues(watchId: number, codes: string[]): void {
+  const q = db.query("INSERT OR IGNORE INTO seen_venues (watch_id, venue_code) VALUES (?, ?)");
+  for (const c of codes) q.run(watchId, c);
+}
+
+export function shouldSilentSeedVenues(watchId: number): boolean {
+  const venues = seenVenues(watchId);
+  if (venues.length) return false;
+  return seenDates(watchId).length > 0;
 }
