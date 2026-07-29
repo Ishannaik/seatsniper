@@ -106,6 +106,51 @@ export function newDates(opts: { title: string; city: string; dates: string[]; u
   };
 }
 
+/** Subscription payoff: venues that weren't listing last time now are. */
+export function newCinemas(opts: {
+  title: string; city: string; venues: { code: string; name: string }[]; url: string;
+}) {
+  const list = opts.venues.slice(0, 8)
+    .map((v) => `**${v.name}** (\`${v.code}\`)`)
+    .join("\n");
+  const extra = opts.venues.length - Math.min(opts.venues.length, 8);
+  const embed = sig(new EmbedBuilder(), "Alert")
+    .setColor(LIVE)
+    .setTitle(`${opts.title} — ${opts.venues.length === 1 ? "new cinema" : `${opts.venues.length} new cinemas`}`)
+    .setURL(opts.url)
+    .setDescription(
+      `Now listing in ${titleCase(opts.city)}:\n${list}` +
+        (extra > 0 ? `\n_+${extra} more_` : "") +
+        "\n\nI'll keep watching for more.",
+    )
+    .setTimestamp();
+  return { embeds: [embed], components: [bookButton(opts.url)] };
+}
+
+export function subscriptionAlert(opts: {
+  title: string; city: string; dates: string[];
+  venues: { code: string; name: string }[]; url: string;
+}) {
+  if (opts.dates.length && opts.venues.length) {
+    const embed = sig(new EmbedBuilder(), "Alert")
+      .setColor(LIVE)
+      .setTitle(`${opts.title} — new dates & cinemas`)
+      .setURL(opts.url)
+      .setDescription(`Updates in ${titleCase(opts.city)}.`)
+      .addFields(
+        { name: "New dates", value: opts.dates.map(prettyDate).join(" · ") },
+        {
+          name: "New cinemas",
+          value: opts.venues.slice(0, 8).map((v) => `**${v.name}** (\`${v.code}\`)`).join("\n"),
+        },
+      )
+      .setTimestamp();
+    return { embeds: [embed], components: [bookButton(opts.url)] };
+  }
+  if (opts.dates.length) return newDates(opts);
+  return newCinemas(opts);
+}
+
 /** Quiet confirmation. Not news yet — it must not look like an alert. */
 export function armedForDate(opts: { title: string; city: string; date: string; everyMin: number }) {
   return {
@@ -127,7 +172,7 @@ export function armedForMovie(opts: { title: string; city: string; openNow: stri
     .setColor(ARMED)
     .setTitle(opts.title)
     .setDescription(
-      `Watching every date in ${titleCase(opts.city)}. You'll get a DM each time a new one ` +
+      `Watching every date in ${titleCase(opts.city)}. You'll get a DM when a new date or cinema ` +
         `opens, until you stop it.`,
     )
     .setTimestamp();
@@ -169,7 +214,7 @@ export function watchList(rows: { id: number; title: string; city: string; date:
         w.fail_count >= 3 ? "can't read BookMyShow"
         : w.last_ok_at ? `checked <t:${w.last_ok_at}:R>`
         : "not checked yet";
-      const what = w.date === "" ? "every new date" : prettyDate(w.date);
+      const what = w.date === "" ? "every new date or cinema" : prettyDate(w.date);
       return `**${w.title}** — ${what}\n${titleCase(w.city)} · ${state} · \`/stop id:${w.id}\``;
     })
     .join("\n\n");
