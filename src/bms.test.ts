@@ -116,6 +116,22 @@ test("parseVenues returns unique codes with names", () => {
   ]);
 });
 
+// Legacy flat showtimesSections tree — sessions present but no venue-cards means
+// the page reshaped; must throw, not return [] or silently drop venue data.
+const FLAT_SHOWTIMES = `
+"showtimesSections":[{"showtimes":[{"title":"06:40 AM","screenAttr":"IMAX",
+"additionalData":{"sessionId":"14022","availStatus":"3","cutOffDateTime":"202607280655","cutOffDateTimeEpoch":"1785201900","showDateCode":"20260728","showDateTime":"202607280640","showTimeCode":"0640","showTime":"06:40 AM","attributes":"IMAX"}}]}]`;
+
+test("parseShows throws unparseable when showtimesSections has sessions but no venue-cards", () => {
+  try {
+    parseShows(FLAT_SHOWTIMES);
+    expect.unreachable();
+  } catch (e) {
+    expect(e).toBeInstanceOf(BmsError);
+    expect((e as BmsError).kind).toBe("unparseable");
+  }
+});
+
 // Discord renders <t:epoch:t> in the reader's own timezone, so the epoch has to be
 // the real instant — 06:40 IST, not 06:40 UTC.
 test("istToEpoch treats the wall clock as IST (UTC+5:30)", () => {
