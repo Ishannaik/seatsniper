@@ -287,12 +287,20 @@ export function showsOnDate(shows: Show[], date: string): Show[] {
  */
 export const PROBE_DATE = "20991231";
 
-/** Every date this movie is currently bookable for, in this city. One request. */
+/** Every date this movie is currently bookable for, in this city. One request.
+ *  `venues` is null when venue-cards failed to parse — not the same as []. */
 export async function fetchBookableDates(
   t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] }> {
+): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }> {
   const { title, html } = await fetchPage({ ...t, date: PROBE_DATE });
-  return { title, dates: parseBookableDates(html), venues: parseVenues(html) };
+  const dates = parseBookableDates(html);
+  let venues: { code: string; name: string }[] | null = null;
+  try {
+    venues = parseVenues(html);
+  } catch (e) {
+    console.error(`[bms] venue parse failed for ${t.eventCode}/${t.city}:`, (e as Error).message);
+  }
+  return { title, dates, venues };
 }
 
 /**
@@ -306,7 +314,7 @@ export async function fetchBookableDates(
  * The map is rebuilt every cycle, so it is a within-tick cache and can never serve a
  * stale answer across polls.
  */
-let cycle = new Map<string, Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] }>>();
+let cycle = new Map<string, Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }>>();
 let cycleHits = 0;
 
 export function beginCycle(): void {
@@ -319,7 +327,7 @@ export const coalescedCount = () => cycleHits;
 
 export function bookableDatesCached(
   t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] }> {
+): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }> {
   const key = `${t.city}|${t.eventCode}`;
   const hit = cycle.get(key);
   if (hit) {

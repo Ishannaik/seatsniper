@@ -3,7 +3,7 @@ import { Client, GatewayIntentBits, MessageFlags, type ChatInputCommandInteracti
 import * as msg from "./messages.ts";
 import {
   initBms, closeBms, fetchShowtimes, fetchBookableDates, bookableDatesCached, beginCycle,
-  coalescedCount, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError,
+  coalescedCount, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError, PROBE_DATE,
 } from "./bms.ts";
 import {
   addWatch, listWatches, allWatches, countWatches, removeWatch, markOk, markFail,
@@ -131,7 +131,7 @@ async function subscribeToMovie(
   if (id === null) return void i.editReply("You're already subscribed to that movie. `/list` to see it.");
 
   recordSeenDates(id, dates); // baseline: today's open dates are not "new"
-  recordSeenVenues(id, venues.map((v) => v.code));
+  if (venues) recordSeenVenues(id, venues.map((v) => v.code));
 
   await i.editReply(
     msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000 }),
@@ -163,7 +163,7 @@ async function cmdStop(i: ChatInputCommandInteraction) {
 /** Subscription poll: announce dates and cinemas that weren't bookable last time we looked. */
 async function checkSubscription(w: Watch) {
   let dates: string[];
-  let venues: { code: string; name: string }[];
+  let venues: { code: string; name: string }[] | null;
   try {
     ({ dates, venues } = await bookableDatesCached({
       city: w.city, slug: w.slug, eventCode: w.event_code,
@@ -175,13 +175,15 @@ async function checkSubscription(w: Watch) {
   }
   markOk(w.id);
 
-  let freshVenues: { code: string; name: string }[];
-  if (shouldSilentSeedVenues(w.id)) {
-    recordSeenVenues(w.id, venues.map((v) => v.code));
-    freshVenues = [];
-  } else {
-    const known = new Set(seenVenues(w.id));
-    freshVenues = venues.filter((v) => !known.has(v.code));
+  // null venues = parse failed; skip cinema diff (don't treat as "no cinemas").
+  let freshVenues: { code: string; name: string }[] = [];
+  if (venues) {
+    if (shouldSilentSeedVenues(w.id)) {
+      recordSeenVenues(w.id, venues.map((v) => v.code));
+    } else {
+      const known = new Set(seenVenues(w.id));
+      freshVenues = venues.filter((v) => !known.has(v.code));
+    }
   }
 
   const knownDates = new Set(seenDates(w.id));
@@ -192,7 +194,7 @@ async function checkSubscription(w: Watch) {
     city: w.city,
     slug: w.slug,
     eventCode: w.event_code,
-    date: freshDates[0] ?? dates[0] ?? "20991231",
+    date: freshDates[0] ?? dates[0] ?? PROBE_DATE,
   });
 
   // Only mark these announced once they actually reached the user. Recording first
