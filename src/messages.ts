@@ -64,7 +64,7 @@ const formatsOf = (shows: Show[]) =>
 
 /** The payoff: this date just became bookable. */
 export function ticketsLive(opts: {
-  title: string; city: string; date: string; shows: Show[]; url: string;
+  title: string; city: string; date: string; shows: Show[]; url: string; filters?: string | null;
 }) {
   const fmts = formatsOf(opts.shows);
   const embed = sig(new EmbedBuilder(), "Alert")
@@ -73,7 +73,8 @@ export function ticketsLive(opts: {
     .setURL(opts.url)
     .setDescription(
       `${opts.shows.length} show${opts.shows.length === 1 ? "" : "s"} in ` +
-        `${titleCase(opts.city)} on ${prettyDate(opts.date)}.`,
+        `${titleCase(opts.city)} on ${prettyDate(opts.date)}.` +
+        (opts.filters ? `\n_Matching your filter: ${opts.filters}_` : ""),
     )
     .addFields({ name: "Showtimes", value: timeList(opts.shows) })
     .setTimestamp();
@@ -88,7 +89,7 @@ export function ticketsLive(opts: {
 }
 
 /** Subscription payoff: dates that weren't on sale last time now are. */
-export function newDates(opts: { title: string; city: string; dates: string[]; url: string }) {
+export function newDates(opts: { title: string; city: string; dates: string[]; url: string; filters?: string | null }) {
   const n = opts.dates.length;
   return {
     embeds: [
@@ -98,7 +99,8 @@ export function newDates(opts: { title: string; city: string; dates: string[]; u
         .setURL(opts.url)
         .setDescription(
           `${opts.dates.map(prettyDate).join(" · ")}\n\nNow on sale in ${titleCase(opts.city)}. ` +
-            "I'll keep watching for later dates.",
+            "I'll keep watching for later dates." +
+            (opts.filters ? `\n_Matching your filter: ${opts.filters}_` : ""),
         )
         .setTimestamp(),
     ],
@@ -108,7 +110,7 @@ export function newDates(opts: { title: string; city: string; dates: string[]; u
 
 /** Subscription payoff: venues that weren't listing last time now are. */
 export function newCinemas(opts: {
-  title: string; city: string; venues: { code: string; name: string }[]; url: string;
+  title: string; city: string; venues: { code: string; name: string }[]; url: string; filters?: string | null;
 }) {
   const list = opts.venues.slice(0, 8)
     .map((v) => `**${v.name}** (\`${v.code}\`)`)
@@ -121,7 +123,8 @@ export function newCinemas(opts: {
     .setDescription(
       `Now listing in ${titleCase(opts.city)}:\n${list}` +
         (extra > 0 ? `\n_+${extra} more_` : "") +
-        "\n\nI'll keep watching for more.",
+        "\n\nI'll keep watching for more." +
+        (opts.filters ? `\n_Matching your filter: ${opts.filters}_` : ""),
     )
     .setTimestamp();
   return { embeds: [embed], components: [bookButton(opts.url)] };
@@ -130,13 +133,15 @@ export function newCinemas(opts: {
 export function subscriptionAlert(opts: {
   title: string; city: string; dates: string[];
   venues: { code: string; name: string }[]; url: string;
+  filters?: string | null; matchedFormats?: string[];
 }) {
+  const filterLine = opts.filters ? `\n_Matching your filter: ${opts.filters}${opts.matchedFormats?.length ? ` (found: ${opts.matchedFormats.join(" · ")})` : ""}_` : "";
   if (opts.dates.length && opts.venues.length) {
     const embed = sig(new EmbedBuilder(), "Alert")
       .setColor(LIVE)
       .setTitle(`${opts.title} — new dates & cinemas`)
       .setURL(opts.url)
-      .setDescription(`Updates in ${titleCase(opts.city)}.`)
+      .setDescription(`Updates in ${titleCase(opts.city)}.` + filterLine)
       .addFields(
         { name: "New dates", value: opts.dates.map(prettyDate).join(" · ") },
         {
@@ -152,7 +157,7 @@ export function subscriptionAlert(opts: {
 }
 
 /** Quiet confirmation. Not news yet — it must not look like an alert. */
-export function armedForDate(opts: { title: string; city: string; date: string; everyMin: number }) {
+export function armedForDate(opts: { title: string; city: string; date: string; everyMin: number; filters?: string | null }) {
   return {
     embeds: [
       sig(new EmbedBuilder(), "Watch")
@@ -160,6 +165,7 @@ export function armedForDate(opts: { title: string; city: string; date: string; 
         .setTitle(opts.title)
         .setDescription(
           `Waiting for **${prettyDate(opts.date)}** in ${titleCase(opts.city)} to go on sale.\n` +
+            (opts.filters ? `Only pinging for **${opts.filters}**.\n` : "") +
             `Checking every ${opts.everyMin} minutes — you'll get a DM the moment it does.`,
         )
         .setTimestamp(),
@@ -167,13 +173,14 @@ export function armedForDate(opts: { title: string; city: string; date: string; 
   };
 }
 
-export function armedForMovie(opts: { title: string; city: string; openNow: string[]; everyMin: number }) {
+export function armedForMovie(opts: { title: string; city: string; openNow: string[]; everyMin: number; filters?: string | null }) {
   const e = sig(new EmbedBuilder(), "Watch")
     .setColor(ARMED)
     .setTitle(opts.title)
     .setDescription(
       `Watching every date in ${titleCase(opts.city)}. You'll get a DM when a new date or cinema ` +
-        `opens, until you stop it.`,
+        `opens, until you stop it.` +
+        (opts.filters ? `\nOnly pinging for **${opts.filters}**.` : ""),
     )
     .setTimestamp();
   e.addFields(
@@ -207,7 +214,7 @@ export function alreadyOnSale(opts: {
   return { embeds: [e], components: [bookButton(opts.url)] };
 }
 
-export function watchList(rows: { id: number; title: string; city: string; date: string; fail_count: number; last_ok_at: number | null }[]) {
+export function watchList(rows: { id: number; title: string; city: string; date: string; fail_count: number; last_ok_at: number | null; format_filter?: string | null; day_filter?: string | null }[]) {
   const body = rows
     .map((w) => {
       const state =
@@ -215,7 +222,10 @@ export function watchList(rows: { id: number; title: string; city: string; date:
         : w.last_ok_at ? `checked <t:${w.last_ok_at}:R>`
         : "not checked yet";
       const what = w.date === "" ? "every new date or cinema" : prettyDate(w.date);
-      return `**${w.title}** — ${what}\n${titleCase(w.city)} · ${state} · \`/stop id:${w.id}\``;
+      const filt = (w.format_filter || w.day_filter)
+        ? `\n🎯 ${[w.format_filter, w.day_filter].filter(Boolean).join(" · ")}`
+        : "";
+      return `**${w.title}** — ${what}\n${titleCase(w.city)} · ${state} · \`/stop id:${w.id}\`${filt}`;
     })
     .join("\n\n");
   return {
@@ -270,6 +280,13 @@ export function help() {
               "```/watch link:<paste>```" +
               "Leave the date out. Pings you each time a **new** date opens, " +
               "until you stop it. Good for a film that isn't out yet.",
+          },
+          {
+            name: "Filter by format / day",
+            value:
+              "```/watch link:<paste> format:IMAX,4DX days:fri,sat,sun```" +
+              "Optional. Only pings when a matching show appears. " +
+              "Formats: IMAX, 4DX, ScreenX, 3D, 2D, MX4D, Dolby Atmos…",
           },
           {
             name: "Manage",

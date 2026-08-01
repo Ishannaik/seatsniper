@@ -30,19 +30,65 @@ function normaliseDate(input: string): string {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
+// ---------------------------------------------------------------- filters
+
+/** Known BMS screen formats for autocomplete. */
+const FORMAT_CHOICES = ["IMAX", "IMAX 3D", "4DX", "ScreenX", "3D", "2D", "MX4D", "ICE", "Dolby Atmos", "Dolby Cinema", "RPX", "VIP"];
+const DAY_CHOICES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+/** "IMAX, 4dx , screenx" -> "IMAX,4DX,SCREENX" | null */
+function normaliseFormats(raw: string | null): string | null {
+  if (!raw?.trim()) return null;
+  return raw.split(",").map((f) => f.trim().toUpperCase()).filter(Boolean).join(",") || null;
+}
+
+/** "Fri, SAT ,sun" -> "fri,sat,sun" | null */
+function normaliseDays(raw: string | null): string | null {
+  if (!raw?.trim()) return null;
+  const days = raw.split(",").map((d) => d.trim().toLowerCase().slice(0, 3)).filter((d) => DAY_CHOICES.includes(d));
+  return days.length ? days.join(",") : null;
+}
+
+/** YYYYMMDD -> "mon"|"tue"|...|"sun" (UTC, host-TZ-independent). */
+function dayOfWeek(dateCode: string): string {
+  const [y, m, d] = [+dateCode.slice(0, 4), +dateCode.slice(4, 6), +dateCode.slice(6, 8)];
+  return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][new Date(Date.UTC(y, m - 1, d)).getUTCDay()]!;
+}
+
+/** Does a show's format match the filter? Case-insensitive substring: "IMAX" catches "IMAX 3D". */
+function matchesFormat(attributes: string, filter: string): boolean {
+  const attr = (attributes ?? "").toUpperCase();
+  return filter.split(",").some((f) => attr.includes(f));
+}
+
+/** Does a YYYYMMDD date fall on one of the filtered days? */
+function matchesDay(dateCode: string, filter: string): boolean {
+  return filter.split(",").includes(dayOfWeek(dateCode));
+}
+
+/** Human-readable filter summary for embeds, e.g. "IMAX · 4DX · Fri, Sat, Sun". */
+function filterSummary(w: { format_filter: string | null; day_filter: string | null }): string | null {
+  const parts: string[] = [];
+  if (w.format_filter) parts.push(w.format_filter.split(",").join(" · "));
+  if (w.day_filter) parts.push(w.day_filter.split(",").map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(", "));
+  return parts.length ? parts.join(" · ") : null;
+}
+
 // ---------------------------------------------------------------- commands
 
 async function cmdWatch(i: ChatInputCommandInteraction) {
   await i.deferReply({ flags: MessageFlags.Ephemeral });
 
   let target;
+  const formatFilter = normaliseFormats(i.options.getString("format"));
+  const dayFilter = normaliseDays(i.options.getString("days"));
   try {
     const parsed = parseWatchUrl(i.options.getString("link", true));
     const dateOpt = i.options.getString("date")?.trim();
     // "any" (or a link with no date and no date option) subscribes to the movie:
     // ping me every time a NEW date unlocks, rather than watching one date.
     const wantsAny = dateOpt ? /^(any|all|every|new)$/i.test(dateOpt) : !parsed.date;
-    if (wantsAny) return void (await subscribeToMovie(i, parsed));
+    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter));
 
     const date = dateOpt ? normaliseDate(dateOpt) : parsed.date!;
     if (date < todayIST()) {
@@ -88,11 +134,12 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   const id = addWatch({
     user_id: i.user.id, channel_id: i.channelId, city: target.city, slug: target.slug,
     event_code: target.eventCode, date: target.date, title,
+    format_filter: formatFilter, day_filter: dayFilter,
   });
   if (id === null) return void i.editReply("You're already watching that movie and date. `/list` to see it.");
 
   await i.editReply(
-    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000 }),
+    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter }) }),
   );
 }
 
@@ -104,6 +151,8 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
 async function subscribeToMovie(
   i: ChatInputCommandInteraction,
   parsed: { city: string; slug: string; eventCode: string },
+  formatFilter: string | null,
+  dayFilter: string | null,
 ) {
   if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
     return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
@@ -127,6 +176,7 @@ async function subscribeToMovie(
   const id = addWatch({
     user_id: i.user.id, channel_id: i.channelId, city: parsed.city, slug: parsed.slug,
     event_code: parsed.eventCode, date: SUBSCRIPTION, title,
+    format_filter: formatFilter, day_filter: dayFilter,
   });
   if (id === null) return void i.editReply("You're already subscribed to that movie. `/list` to see it.");
 
@@ -134,7 +184,7 @@ async function subscribeToMovie(
   if (venues) recordSeenVenues(id, venues.map((v) => v.code));
 
   await i.editReply(
-    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000 }),
+    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter }) }),
   );
 }
 
@@ -187,7 +237,29 @@ async function checkSubscription(w: Watch) {
   }
 
   const knownDates = new Set(seenDates(w.id));
-  const freshDates = dates.filter((d) => !knownDates.has(d));
+  let freshDates = dates.filter((d) => !knownDates.has(d));
+
+  // Apply day filter to fresh dates before announcing.
+  if (w.day_filter) freshDates = freshDates.filter((d) => matchesDay(d, w.day_filter!));
+
+  // Format filter: only announce dates that actually have matching shows.
+  // Costs an extra fetchShowtimes per fresh date — only spent when a format filter is set.
+  let matchedFormats: string[] = [];
+  if (w.format_filter && freshDates.length) {
+    const kept: string[] = [];
+    for (const d of freshDates) {
+      try {
+        const shows = showsOnDate((await fetchShowtimes({ city: w.city, slug: w.slug, eventCode: w.event_code, date: d })).shows, d);
+        const hits = shows.filter((s) => matchesFormat(s.attributes, w.format_filter!));
+        if (hits.length) {
+          kept.push(d);
+          for (const h of hits) if (h.attributes && !matchedFormats.includes(h.attributes)) matchedFormats.push(h.attributes);
+        }
+      } catch { /* skip uncheckable dates — they'll retry next poll */ }
+    }
+    freshDates = kept;
+  }
+
   if (!freshDates.length && !freshVenues.length) return;
 
   const url = showtimesUrl({
@@ -201,6 +273,7 @@ async function checkSubscription(w: Watch) {
   // would lose the alert permanently if delivery failed.
   if (await dm(w, msg.subscriptionAlert({
     title: w.title, city: w.city, dates: freshDates, venues: freshVenues, url,
+    filters: filterSummary(w), matchedFormats,
   }))) {
     if (freshDates.length) recordSeenDates(w.id, freshDates);
     if (freshVenues.length) recordSeenVenues(w.id, freshVenues.map((v) => v.code));
@@ -234,9 +307,16 @@ async function checkWatch(w: Watch) {
   markOk(w.id);
   if (!open.length) return;
 
+  // Apply user filters: only fire if shows match the requested format/day.
+  let filtered = open;
+  if (w.format_filter) filtered = filtered.filter((s) => matchesFormat(s.attributes, w.format_filter!));
+  if (w.day_filter) filtered = filtered.filter((s) => matchesDay(s.showDateCode, w.day_filter!));
+  if (!filtered.length) return; // shows exist but none match — stay silent, keep watching
+
   // Same rule: a watch is only "done its job" once the user was actually told.
   const delivered = await dm(w, msg.ticketsLive({
-    title: w.title, city: w.city, date: w.date, shows: open, url: showtimesUrl(target),
+    title: w.title, city: w.city, date: w.date, shows: filtered, url: showtimesUrl(target),
+    filters: filterSummary(w),
   }));
   if (delivered) removeWatch(w.id, w.user_id);
   else console.error(`[watch ${w.id}] undelivered, keeping watch alive to retry`);
@@ -312,6 +392,17 @@ async function poll() {
 // ---------------------------------------------------------------- wire-up
 
 client.on("interactionCreate", async (i) => {
+  // Autocomplete for /watch format + days options.
+  if (i.isAutocomplete()) {
+    const focused = i.options.getFocused(true);
+    const val = focused.value.toLowerCase();
+    const choices = focused.name === "format" ? FORMAT_CHOICES : DAY_CHOICES;
+    const matches = choices
+      .filter((c) => c.toLowerCase().includes(val))
+      .slice(0, 25)
+      .map((c) => ({ name: c, value: c }));
+    return void i.respond(matches).catch(() => {});
+  }
   if (!i.isChatInputCommand()) return;
   try {
     if (i.commandName === "help") await i.reply({ ...msg.help(), flags: MessageFlags.Ephemeral });

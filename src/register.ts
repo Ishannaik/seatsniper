@@ -13,7 +13,11 @@ const commands = [
     .addStringOption((o) =>
       o.setName("link").setDescription("Paste the BookMyShow movie link").setRequired(true))
     .addStringOption((o) =>
-      o.setName("date").setDescription("Date e.g. 2026-07-30, or \"any\" to be told every time a new date opens")),
+      o.setName("date").setDescription("Date e.g. 2026-07-30, or \"any\" to be told every time a new date opens"))
+    .addStringOption((o) =>
+      o.setName("format").setDescription("Only ping for these formats, e.g. IMAX,4DX,ScreenX").setAutocomplete(true))
+    .addStringOption((o) =>
+      o.setName("days").setDescription("Only ping on these days, e.g. fri,sat,sun").setAutocomplete(true)),
   new SlashCommandBuilder().setName("help").setDescription("How SeatSniper works"),
   new SlashCommandBuilder().setName("list").setDescription("Show your active watches"),
   new SlashCommandBuilder()
