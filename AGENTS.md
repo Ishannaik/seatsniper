@@ -15,6 +15,7 @@ Discord bot that watches BookMyShow and DMs you when a date opens (or when a new
 bun install
 bun pm trust --all          # required: node-tls-client postinstall fetches its Go lib
 cp .env.example .env        # DISCORD_TOKEN, DISCORD_CLIENT_ID; optional DISCORD_GUILD_ID
+# or: curl -fsSL …/install.sh | bash
 bun run commands            # register slash commands (guild = instant, else ~1h)
 bun run dev                 # watch mode
 bun test                    # bun test
@@ -36,7 +37,9 @@ src/
 docs/superpowers/specs/   design + measured BMS findings
 ```
 
-README still sketches a modular `core/` / `providers/` layout — that is the *design* target, not the current tree. Do not invent folders that are not there.
+README documents the shipped layout above. The modular `core/` / `providers/`
+layout in earlier specs is a design target, not the current tree. Do not invent
+folders that are not there.
 
 ## Hard constraints (measured, do not regress)
 
@@ -47,6 +50,7 @@ Full write-up: `docs/superpowers/specs/2026-07-27-bms-access-findings.md`.
 3. **Errors are not empty results.** Unparseable / blocked / network failures throw `BmsError`. Never swallow them into `[]` — that is how prior art stayed silently dead forever.
 4. **Validate watches at creation.** Hit live BMS when `/watch` is saved so a bad link fails immediately instead of never firing.
 5. **Coalesce polls.** Multiple watches on the same movie share one request per cycle.
+6. **No Camoufox / headless browser as the poller.** Showtimes are server-rendered in buytickets HTML; Safari TLS already gets 200 in ~50 ms (~15 MB lib). Camoufox was **never measured** on this stack — only rejected on cost (~150 MB RAM, seconds/request) for no better signal while TLS works. If CF hardens: rotate Safari/Firefox TLS profile first; only then spike a browser — do not assume Camoufox works until it returns 200 with parseable showtimes from Oracle.
 
 ## Product behaviour
 

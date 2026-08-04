@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not work as expected
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Fill in what you can; the details help a lot.
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: How are you running it, and where?
+      placeholder: "Docker on a home server, or install.sh on Oracle VPS"
+    validations:
+      required: true
+  - type: input
+    id: bms-link
+    attributes:
+      label: BookMyShow link
+      description: The link you watched (event code + city are the important parts)
+      placeholder: "in.bookmyshow.com/movies/mumbai/.../buytickets/ET00480917/..."
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. /watch link:... date:...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      placeholder: "Nothing arrived. The bot logged [poll] with no errors."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Bot logs
+      description: Console output around the failure, if any

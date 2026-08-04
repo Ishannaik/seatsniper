@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MIT license, open-source community kit (CONTRIBUTING, issue + PR templates, security policy).
+- Dockerfile and docker-compose for container deploys.
+- Docker and configuration docs in the README.
+
 ## [0.2.0] - 2026-07-30
 
 ### Added

@@ -1,131 +1,204 @@
 <p align="center">
-  <img src="assets/logo.png" alt="SeatSniper" width="360">
+  <img src="assets/logo.png" alt="SeatSniper" width="320">
 </p>
 
-<p align="center"><b>Discord bot that watches BookMyShow and pings you the moment your show opens.</b></p>
+<h1 align="center">SeatSniper</h1>
+
+<p align="center">
+  <b>Watch any BookMyShow page. Get a Discord DM the second tickets go on sale.</b><br>
+  Self-host in one command. Bun + TypeScript + SQLite. No API keys, no credit card, no browser.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/Ishannaik/seatsniper"></a>
+  <a href=".github/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Ishannaik/seatsniper/ci.yml"></a>
+  <img alt="Runtime: Bun 1.2" src="https://img.shields.io/badge/runtime-Bun%201.2-black">
+  <img alt="Language: TypeScript" src="https://img.shields.io/badge/language-TypeScript-3178C6">
+  <img alt="discord.js v14" src="https://img.shields.io/badge/discord.js-v14-5865F2">
+  <img alt="Storage: SQLite" src="https://img.shields.io/badge/storage-SQLite-003B57">
+  <a href="https://github.com/Ishannaik/seatsniper/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/Ishannaik/seatsniper"></a>
+</p>
+
+<p align="center">
+  <img alt="The DM SeatSniper sends" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MjAiIGhlaWdodD0iMjQ2IiB2aWV3Qm94PSIwIDAgNjIwIDI0NiIgZm9udC1mYW1pbHk9Ii1hcHBsZS1zeXN0ZW0sIEJsaW5rTWFjU3lzdGVtRm9udCwgJ1NlZ29lIFVJJywgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMCIgeTI9IjEiPjxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzMyMzMzOCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzJiMmQzMSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI2MjAiIGhlaWdodD0iMjQ2IiByeD0iMTAiIGZpbGw9InVybCgjYmcpIi8+PHJlY3QgeD0iMCIgeT0iMjAiIHdpZHRoPSI0IiBoZWlnaHQ9IjIwMCIgZmlsbD0iI0VERDQyNSIvPjxyZWN0IHg9IjIwIiB5PSIyNCIgd2lkdGg9IjIyIiBoZWlnaHQ9IjIyIiByeD0iNSIgZmlsbD0iI0VERDQyNSIvPjx0ZXh0IHg9IjMxIiB5PSI0MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2ZmZmZmZiIgZm9udC13ZWlnaHQ9IjcwMCI+U1M8L3RleHQ+PHRleHQgeD0iNTAiIHk9IjQwIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYjVjMWMwIj5TZWF0U25pcGVyPC90ZXh0Pjx0ZXh0IHg9IjYwMCIgeT0iNDAiIHRleHQtYW5jaG9yPSJlbmQiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNiNWMxYzAiPkRNIC4ganVzdCBub3c8L3RleHQ+PHRleHQgeD0iMjAiIHk9Ijc2IiBmb250LXNpemU9IjE3IiBmaWxsPSIjZjJmM2Y1IiBmb250LXdlaWdodD0iNzAwIj7wn42mIFRpY2tldHMgYXJlIGxpdmUhPC90ZXh0Pjx0ZXh0IHg9IjIwIiB5PSIxMDQiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNkYmRlZTEiPlRoZSBPZHlzc2V5IC4gNEsgM0QgSU1BWCAuIE11bWJhaTwvdGV4dD48dGV4dCB4PSIyMCIgeT0iMTIyIiBmb250LXNpemU9IjEzIiBmaWxsPSIjZGJkZWUxIj5Cb29raW5ncyBqdXN0IG9wZW5lZC4gU2F0dXJkYXkgaXMgb24gc2FsZS48L3RleHQ+PHRleHQgeD0iMjAiIHk9IjE2MCIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2I1YzFjMCIgZm9udC13ZWlnaHQ9IjYwMCI+R0FURTwvdGV4dD48dGV4dCB4PSIyMCIgeT0iMTc4IiBmb250LXNpemU9IjEzIiBmaWxsPSIjZjJmM2Y1Ij5TYXQsIDIgQXVnIDIwMjY8L3RleHQ+PHRleHQgeD0iMjEwIiB5PSIxNjAiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNiNWMxYzAiIGZvbnQtd2VpZ2h0PSI2MDAiPkNJVFk8L3RleHQ+PHRleHQgeD0iMjEwIiB5PSIxNzgiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNmMmYzZjUiPk11bWJhaTwvdGV4dD48dGV4dCB4PSIyMCIgeT0iMjEwIiBmb250LXNpemU9IjExIiBmaWxsPSIjYjVjMWMwIiBmb250LXdlaWdodD0iNjAwIj5DSU5FTUFTPC90ZXh0Pjx0ZXh0IHg9IjIwIiB5PSIyMjgiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNmMmYzZjUiPlBWUiBJY29uLCBJbm94IE1lZ2FwbGV4PC90ZXh0Pjwvc3ZnPg==">
+</p>
+
+<p align="center">
+  <code>curl -fsSL https://raw.githubusercontent.com/Ishannaik/seatsniper/main/install.sh | bash</code>
+</p>
 
 ---
 
-## What it does
+## TL;DR
 
-You tell it a movie, a city, and optionally a theatre or screen format. It polls
-BookMyShow on an interval and pings you in Discord when something changes:
+You tell it a BookMyShow link and a date. It polls the site, and the moment that
+date is bookable you get one DM. Say `date:any` instead and it pings you every
+time a *new* date unlocks or a *new* cinema starts showing the movie. Trim the
+noise with filters: `format:IMAX,4DX` only pings for those screens, and
+`days:fri,sat` only on those weekdays.
 
-- **Bookings open** for a movie that wasn't bookable yet
-- **A new date** appears (Friday release, Saturday shows drop later)
-- **A new show** is added (a 9:30 PM IMAX that wasn't there this morning)
+Works for movies, concerts, plays, any event BookMyShow lists in India.
 
-## Status
+It observes and notifies. It never buys tickets, holds seats, or fills carts.
 
-Pre-MVP. The provider layer is being built against verified BookMyShow endpoints
-(see [Research](#research)).
+## Table of contents
 
-## Stack
+- [🎯 Features](#features)
+- [🚀 Quick start](#quick-start)
+- [🐳 Run with Docker](#run-with-docker)
+- [📦 Manual setup](#manual-setup)
+- [🎮 Commands](#commands)
+- [🧠 How it works](#how-it-works)
+- [⚙️ Configuration](#configuration)
+- [🗺️ Project layout](#project-layout)
+- [🧗 BookMyShow quirks](#bookmyshow-quirks)
+- [🤝 Contributing](#contributing)
+
+## 🎯 Features
 
 | | |
-|---|---|
-| Runtime | Bun 1.2 |
-| Language | TypeScript |
-| Discord | discord.js v14 |
-| Storage | `bun:sqlite` (built in, no dependency) |
-| Scheduling | in-process interval |
+| --- | --- |
+| 📅 **Watch one date** | One DM the moment that date opens. The watch then deletes itself. No spam. |
+| 🎬 **Subscribe to a movie** | `date:any` = a DM every time a new date unlocks or a new cinema appears. |
+| 🎥 **Format + day filters** | Only ping for the screens you care about: `format:IMAX,4DX` matches by name, `days:fri,sat` by weekday. |
+| ✅ **Validates at creation** | The link is checked against the live site when you save it, so a broken watch fails immediately, not silently. |
+| ⚡ **One request per movie** | 50 watches on the same movie cost the same as 1. Coalesced polling keeps BookMyShow happy. |
+| 📱 **User-install commands** | Works in DMs and servers, installs straight to your account. |
+| 💾 **SQLite, zero config** | No database server, no Docker required. One file. |
 
-## Layout
+## 🚀 Quick start
+
+One command on Linux or macOS. It installs Bun, clones the repo, prompts for
+your Discord credentials, registers the slash commands, and starts the bot under
+pm2:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ishannaik/seatsniper/main/install.sh | bash
+```
+
+Non-interactive, for CI or a box with no terminal:
+
+```bash
+DISCORD_TOKEN=... DISCORD_CLIENT_ID=... bash <(curl -fsSL https://raw.githubusercontent.com/Ishannaik/seatsniper/main/install.sh)
+```
+
+Then:
+
+1. Invite the bot with the URL the installer prints.
+2. In Discord, run `/watch` and paste a BookMyShow link.
+3. Wait. The DM arrives when tickets go live.
+
+## 🐳 Run with Docker
+
+```bash
+git clone https://github.com/Ishannaik/seatsniper.git && cd seatsniper
+cp .env.example .env                  # fill in DISCORD_TOKEN and DISCORD_CLIENT_ID
+docker compose run --rm seatsniper bun run commands   # register slash commands
+docker compose up -d
+```
+
+The database lives in a named volume, so the bot survives container restarts.
+
+## 📦 Manual setup
+
+```bash
+bun install               # installs via bun.sh
+cp .env.example .env      # DISCORD_TOKEN, DISCORD_CLIENT_ID
+bun run commands          # register slash commands
+bun run start             # or: bun run dev for watch mode
+```
+
+<details>
+<summary><b>Behind pm2</b></summary>
+
+```bash
+pm2 start "$HOME/.bun/bin/bun" --name seatsniper --interpreter none --time -- run src/index.ts
+pm2 save
+```
+
+Bun auto-loads `.env` from the working directory.
+</details>
+
+## 🎮 Commands
+
+| Command | What it does |
+| --- | --- |
+| `/watch link:<url> date:YYYY-MM-DD` | DM once when that date opens, then delete the watch |
+| `/watch link:<url> date:any` | Subscribe. DM when a new date or cinema appears |
+| `/watch link:<url> format:IMAX,4DX days:fri,sat` | Optional filters on any watch. Ping only for these formats or weekdays |
+| `/list` | Show your active watches |
+| `/stop id:<n>` | Stop watch `n` from `/list` |
+| `/help` | How the bot works |
+
+Each user can hold up to 5 watches.
+
+## 🧠 How it works
+
+1. **Save.** `/watch` parses the link, then hits BookMyShow once to confirm the
+   movie exists. Bad links fail here, not days later.
+2. **Poll.** Every `POLL_INTERVAL_SEC` (default 600 s) the bot checks each
+   watch. Watches on the same movie share one request.
+3. **Detect.** Availability comes from the `showDateCode` on each show.
+   BookMyShow silently serves the nearest bookable date when the one you asked
+   for is closed, so the URL, the HTTP status, and the page header all lie. The
+   per-show field does not.
+4. **Notify.** A dated watch DMs you once, then removes itself. A subscription
+   compares today's dates and cinemas against what it has seen before and DMs
+   the difference.
+
+Failure is never silence. A blocked or unparseable response throws and logs;
+after 3 consecutive failures the bot tells you, so a dead poller cannot sit
+quietly forever.
+
+## ⚙️ Configuration
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `DISCORD_TOKEN` | yes | | Bot token from the Discord developer portal |
+| `DISCORD_CLIENT_ID` | yes | | Application ID from the same page |
+| `DISCORD_GUILD_ID` | no | | Register commands in one guild instantly instead of waiting ~1 h for global |
+| `POLL_INTERVAL_SEC` | no | `600` | Seconds between poll cycles |
+| `DB_PATH` | no | `seatsniper.db` | SQLite file location |
+| `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll |
+
+## 🗺️ Project layout
 
 ```
 src/
-  core/         watch model · scheduler · change detection
-  providers/
-    bms/        BookMyShow adapter
-  notify/
-    discord/    embed builder + send
-  bot/          slash commands
-  store/        SQLite
-assets/         logo
+  index.ts      bot, poll loop, slash handlers
+  bms.ts        BookMyShow client, URL parsing, availability
+  db.ts         SQLite: watches, seen dates, seen venues
+  messages.ts   Discord copy and embeds
+  register.ts   slash command registration
+assets/          logo
+docs/            design specs and measured findings
 ```
 
-Two seams matter. Every provider returns the same normalised `Show[]`, so `core/`
-never knows BookMyShow exists — a second ticketing site is a new folder, not a
-rewrite. And `core/` emits a typed `AlertEvent` that each channel renders its own
-way, so Telegram or email later is one file each.
+## 🧗 BookMyShow quirks
 
-Change detection is snapshot diffing: store the last-seen `Show[]` per watch,
-compare on each poll, emit events for rows that weren't there before. "Bookings
-opened", "new date", and "new show" are all the same three lines of logic.
+- **Geo-fenced.** Datacenter IPs outside India can be blocked. A home server in
+  India is the safest host. The bot speaks Safari's TLS fingerprint via
+  `node-tls-client`, which passes BookMyShow's Cloudflare checks.
+- **No heuristics.** Availability is a field comparison, not a scrape-and-guess.
+  The measured findings behind this live in
+  [`docs/superpowers/specs/2026-07-27-bms-access-findings.md`](docs/superpowers/specs/2026-07-27-bms-access-findings.md).
 
-## Setup
+## 🤝 Contributing
 
-```bash
-bun install
-bun pm trust --all       # node-tls-client's postinstall fetches its Go library
-cp .env.example .env     # fill in DISCORD_TOKEN and DISCORD_CLIENT_ID
-bun run commands         # register slash commands
-bun run dev
-```
+Bug reports, feature ideas, and PRs are welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md), which covers the setup and the hard
+constraints the bot was built around. Report security issues privately, see
+[SECURITY.md](SECURITY.md).
 
-## Deployment
+## 📄 License
 
-Runs on the Oracle VPS under pm2:
+MIT, see [LICENSE](LICENSE).
 
-```bash
-cd ~/seatsniper
-pm2 start "$HOME/.bun/bin/bun" --name seatsniper --interpreter none --time -- run src/index.ts
-pm2 save                 # persist across reboots (pm2 startup already configured)
+---
 
-pm2 logs seatsniper      # follow
-pm2 restart seatsniper   # after a deploy
-```
+⭐ **If SeatSniper saved you a ticket, star the repo so the next person finds
+it.**
 
-Bun auto-loads `.env` from the working directory, so pm2 needs no env wiring.
-
-## Usage
-
-```
-/watch link:<paste a BookMyShow link>  date:2026-07-30
-/watch link:<paste a BookMyShow link>  date:any
-/list
-/stop id:3
-```
-
-The bot validates the link against the live site immediately, so a broken watch
-fails at creation instead of silently never firing. When the date opens it DMs you
-once and deletes the watch. Subscriptions (`date:any`) keep watching and ping when
-a new bookable date unlocks or a new cinema starts listing the movie.
-
-## Research
-
-Prior art was read line by line before any code was written. Findings that shaped
-the design:
-
-**BookMyShow does expose JSON APIs** for lookup — `deCodeIt/book-my-show-notification`
-calls [`/api/explore/v1/discover/regions`](https://github.com/deCodeIt/book-my-show-notification/blob/163589203890aa03d9229a1aab917b5090e17951/BookMyShow.py#L167-L180)
-for cities and [`/pwa/api/de/venues?regionCode=…&eventType=MT`](https://github.com/deCodeIt/book-my-show-notification/blob/163589203890aa03d9229a1aab917b5090e17951/BookMyShow.py#L113-L126)
-for venues. No browser needed for either.
-
-**Showtimes are harder.** That project scrapes a `var UAPI = JSON.parse("…")` blob
-out of an inline `<script>` on the cinema page
-([source](https://github.com/deCodeIt/book-my-show-notification/blob/163589203890aa03d9229a1aab917b5090e17951/BookMyShow.py#L257-L316)).
-`ayush-cyber01/Bookmyshow_moviealert` doesn't parse at all — it
-[counts how often the target date appears in the raw HTML](https://github.com/ayush-cyber01/Bookmyshow_moviealert/blob/main/poller.py#L165-L186)
-and calls it open if that date is the most frequent token. Both are guesses about
-page structure rather than reads of a contract.
-
-**Failure is silent in both.** A 403, a CAPTCHA, or a region block returns HTTP 200
-with the wrong body, matches nothing, and reads as "not open yet" forever. Neither
-project can tell "no tickets" apart from "scraping broke". SeatSniper treats an
-unparseable response as an error, not as a negative.
-
-**BookMyShow is geo-fenced.** Datacenter IPs outside India get blocked, which is why
-the GitHub Actions approach needs a proxy. Affects hosting choice, not code.
-
-| | `Bookmyshow_moviealert` | `book-my-show-notification` |
-|---|---|---|
-| Detection | date-token frequency in HTML | embedded `UAPI` JSON |
-| Alerts | Telegram | desktop / PushBullet |
-| Scheduling | external cron → Actions | foreground `while` loop |
-| Alerts fire | once, ever | once, then loops forever |
-| Multi-watch | no | no |
-
-## Licence
-
-Not yet chosen.
+<p align="center">
+  <sub>Observes and notifies only. Never buys tickets. Made for the Friday 9 AM rush.</sub>
+</p>

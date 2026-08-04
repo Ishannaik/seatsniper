@@ -1,0 +1,33 @@
+name: Feature request
+description: An idea for SeatSniper
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A short, specific idea is easier to act on than a long wishlist. One issue per idea, please.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      placeholder: "I keep missing the moment Friday shows go on sale and I want to be woken up."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed behaviour
+      placeholder: "A /watch option that sends the DM with a louder notification or a follow-up."
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Fits the project?
+      description: "The non-goals are in README: seat selection, checkout automation, other providers, web dashboard."
+      options:
+        - "Yes, within current non-goals"
+        - "It would expand the non-goals"
+    validations:
+      required: true
