@@ -16,6 +16,9 @@ if (!TOKEN) throw new Error("DISCORD_TOKEN missing — copy .env.example to .env
 
 const POLL_MS = Number(process.env.POLL_INTERVAL_SEC ?? 600) * 1000;
 
+/** Optional Uptime Kuma Push URL. Bot pings it after each poll so Kuma can alert if we die. */
+const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL?.trim() || "";
+
 
 /** "2026-07-30" | "20260730" -> "20260730". Throws on anything else. */
 function normaliseDate(input: string): string {
@@ -371,22 +374,47 @@ async function expireStale(w: Watch): Promise<boolean> {
   return true;
 }
 
+/**
+ * Tell Uptime Kuma we're still alive. Fire-and-forget — a dead Pi must not
+ * break the poll loop. Only called after a poll tick finishes so a hung bot
+ * stops heartbeating and Kuma goes red.
+ */
+async function heartbeatUptime(note: string, pingMs?: number): Promise<void> {
+  if (!UPTIME_KUMA_PUSH_URL) return;
+  try {
+    const url = new URL(UPTIME_KUMA_PUSH_URL);
+    if (!url.searchParams.has("status")) url.searchParams.set("status", "up");
+    url.searchParams.set("msg", note);
+    if (pingMs != null) url.searchParams.set("ping", String(Math.max(0, Math.round(pingMs))));
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) console.warn(`[uptime] push HTTP ${res.status}`);
+  } catch (e) {
+    console.warn(`[uptime] push failed: ${(e as Error).message}`);
+  }
+}
+
 async function poll() {
   const watches = allWatches();
-  if (!watches.length) return;
-  beginCycle(); // fresh coalescing map; never serves an answer across polls
   const started = Date.now();
+  if (!watches.length) {
+    // Still heartbeat when idle — empty watch list is not "bot is dead".
+    await heartbeatUptime("idle");
+    return;
+  }
+  beginCycle(); // fresh coalescing map; never serves an answer across polls
   for (const w of watches) {
     if (await expireStale(w)) continue;
     await checkWatch(w);
     // Stagger so we never burst. Cheap insurance against looking automated.
     await Bun.sleep(2000 + Math.random() * 3000);
   }
+  const elapsed = Date.now() - started;
   const saved = coalescedCount();
   console.log(
-    `[poll] ${watches.length} watch(es) in ${Math.round((Date.now() - started) / 1000)}s` +
+    `[poll] ${watches.length} watch(es) in ${Math.round(elapsed / 1000)}s` +
       (saved ? ` · ${saved} request(s) saved by coalescing` : ""),
   );
+  await heartbeatUptime(`${watches.length} watches`, elapsed);
 }
 
 // ---------------------------------------------------------------- wire-up

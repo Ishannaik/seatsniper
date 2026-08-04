@@ -204,7 +204,7 @@ it never located the field. We read the value BookMyShow itself uses.
 | Scrape.do / Scrapfly / ScrapingBee | 1,000 credits, ×10–25 multipliers → 40–100 requests |
 | Bright Data | Two research passes disagreed on whether a free tier exists. Unverified, unused |
 | Free residential proxies | Do not exist from reputable providers. Webshare's free tier is datacenter |
-| Camoufox / headless browser | Would likely work, but ~150 MB RAM and seconds per request to fetch a JSON endpoint a 15 MB library fetches in 48 ms |
+| Camoufox / headless browser | **Not measured** (no live spike on Oracle). Rejected while Safari TLS works: ~150 MB RAM + seconds/request vs ~48 ms TLS for the same SSR HTML — no better availability signal. If CF hardens (JS/Turnstile) or showtimes leave HTML: rotate TLS profile first, then spike browser and record pass/fail — do not treat as proven. |
 | `impit` | Only ships firefox and chrome profiles; both are challenged. No Safari |
 
 **None of the paid options are needed.** The free path is strictly better than the
