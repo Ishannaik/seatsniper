@@ -9,7 +9,7 @@ test("resolveTlsProfile defaults to the measured Safari profile", () => {
 });
 
 test("resolveTlsProfile keeps a valid override after trimming", () => {
-  expect(resolveTlsProfile("  safari_ios_20_0 ")).toBe("safari_ios_20_0");
+  expect(resolveTlsProfile("  safari_ios_17_0 ")).toBe("safari_ios_17_0");
 });
 
 test("resolveTlsProfile accepts Safari and Firefox overrides", () => {
