@@ -1,7 +1,19 @@
 import { expect, test } from "bun:test";
 import {
-  parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError,
+  parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, prettyDate, PROBE_DATE, BmsError,
 } from "./bms.ts";
+
+test("prettyDate formats a BMS date as a human-readable day", () => {
+  expect(prettyDate("20260730")).toMatch(/Thu[,]? 30 Jul/);
+});
+
+test("prettyDate handles dates across month boundaries", () => {
+  expect(prettyDate("20251225")).toMatch(/Thu[,]? 25 Dec/);
+});
+
+test("prettyDate does not crash on invalid input", () => {
+  expect(prettyDate("notdate")).toMatch(/Invalid/);
+});
 
 // Trimmed from a real 2026-07-27 response for The Odyssey (ET00480917, Mumbai).
 // Two shows on the 28th, one on the 27th — the exact shape BMS returns when it
