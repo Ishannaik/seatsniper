@@ -84,6 +84,8 @@ test("removeWatch cascades seen date and venue ledgers", () => {
   const id = addSubscriptionWatch();
   recordSeenDates(id, ["20260730"]);
   recordSeenVenues(id, ["MCIW"]);
+  expect(seenDates(id)).toEqual(["20260730"]);
+  expect(seenVenues(id)).toEqual(["MCIW"]);
 
   expect(removeWatch(id, "u1")).toBe(true);
   expect(seenDates(id)).toEqual([]);

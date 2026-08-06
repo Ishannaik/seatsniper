@@ -403,8 +403,14 @@ async function poll() {
   }
   beginCycle(); // fresh coalescing map; never serves an answer across polls
   for (const w of watches) {
-    if (await expireStale(w)) continue;
-    await checkWatch(w);
+    try {
+      if (await expireStale(w)) continue;
+      await checkWatch(w);
+    } catch (e) {
+      // A watch can disappear while a poll is in flight. One stale snapshot must
+      // not abort the rest of the cycle.
+      console.error(`[watch ${w.id}] poll failed:`, (e as Error).message);
+    }
     // Stagger so we never burst. Cheap insurance against looking automated.
     await Bun.sleep(2000 + Math.random() * 3000);
   }
