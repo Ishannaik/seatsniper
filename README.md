@@ -150,6 +150,21 @@ Failure is never silence. A blocked or unparseable response throws and logs;
 after 3 consecutive failures the bot tells you, so a dead poller cannot sit
 quietly forever.
 
+### Request coalescing
+
+Within one poll cycle, the bot keeps a map keyed by movie (city + event).
+`bookableDatesCached` returns the cached BookMyShow response when the same movie
+is watched again, so 50 watches on one film cost roughly one request per cycle.
+`beginCycle()` clears that map at the start of every poll so an answer is never
+served across cycles.
+
+Format filters are intentionally the exception: a format-specific search must
+re-fetch showtimes for a fresh date, which costs an extra request. That is a
+deliberate tradeoff, not a bug.
+
+Coalescing reduces request volume on whatever egress you run. It is not the
+same as a residential IP; TLS fingerprinting is what matters to BookMyShow.
+
 ## ⚙️ Configuration
 
 | Variable | Required | Default | Purpose |
