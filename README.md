@@ -158,9 +158,14 @@ quietly forever.
 | `DISCORD_TOKEN` | yes | | Bot token from the Discord developer portal |
 | `DISCORD_CLIENT_ID` | yes | | Application ID from the same page |
 | `DISCORD_GUILD_ID` | no | | Register commands in one guild instantly instead of waiting ~1 h for global |
-| `POLL_INTERVAL_SEC` | no | `600` | Seconds between poll cycles |
+| `POLL_INTERVAL_SEC` | no | `600` | Seconds between poll cycles (recommend at least 120-300 for personal use) |
 | `DB_PATH` | no | `seatsniper.db` | SQLite file location |
 | `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll |
+
+Keep `POLL_INTERVAL_SEC` at or above 120-300 seconds for personal use. Faster
+polls do **not** require a residential IP; they increase request volume and
+ban/rate-limit risk on any IP class. The default of 600 remains the safe
+baseline.
 
 ## 🗺️ Project layout
 
