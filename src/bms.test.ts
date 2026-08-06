@@ -8,7 +8,8 @@ test("prettyDate formats a BMS date as a human-readable day", () => {
 });
 
 test("prettyDate handles dates across month boundaries", () => {
-  expect(prettyDate("20251225")).toMatch(/Thu[,]? 25 Dec/);
+  expect(prettyDate("20251231")).toMatch(/Wed[,]? 31 Dec/);
+  expect(prettyDate("20260101")).toMatch(/Thu[,]? 1 Jan/);
 });
 
 test("prettyDate does not crash on invalid input", () => {
