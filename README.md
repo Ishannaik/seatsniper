@@ -160,6 +160,7 @@ quietly forever.
 | `POLL_INTERVAL_SEC` | no | `600` | Seconds between poll cycles |
 | `DB_PATH` | no | `seatsniper.db` | SQLite file location |
 | `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll |
+| `BMS_TLS_PROFILE` | no | `safari_ios_18_0` | `node-tls-client` profile for the BookMyShow session. Rotate only between **Safari/Firefox** profiles if Cloudflare starts blocking — never Chrome (see [BookMyShow quirks](#bookmyshow-quirks)). An unknown name fails at startup. |
 
 ## 🗺️ Project layout
 

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError,
+  DEFAULT_TLS_PROFILE, resolveTlsProfile, resolveClientIdentifier,
 } from "./bms.ts";
 
 // Trimmed from a real 2026-07-27 response for The Odyssey (ET00480917, Mumbai).
@@ -172,4 +173,58 @@ test("a date with no shows reads as unavailable even though the page is full of 
 
 test("a date with shows reads as available", () => {
   expect(showsOnDate(parseShows(REAL), "20260728")).toHaveLength(2);
+});
+
+// --- TLS profile selection --------------------------------------------------
+//
+// The default is a measured value, not a preference: a Safari profile gets 200
+// from a datacenter IP where Chrome profiles are challenged. These pin that the
+// override cannot weaken it silently. No TLS session is opened — ClientIdentifier
+// is a plain lookup table, so the resolution path is testable without network.
+
+test("the TLS profile defaults to the pinned Safari one when unset", () => {
+  expect(resolveTlsProfile({})).toBe(DEFAULT_TLS_PROFILE);
+  expect(DEFAULT_TLS_PROFILE).toBe("safari_ios_18_0");
+});
+
+test("BMS_TLS_PROFILE overrides the default", () => {
+  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "safari_ios_17_0" })).toBe("safari_ios_17_0");
+  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "firefox_120" })).toBe("firefox_120");
+});
+
+test("a blank BMS_TLS_PROFILE falls back to the default rather than an empty name", () => {
+  // An operator who comments the value out but leaves the key, or leaves
+  // trailing whitespace, gets the default — not a lookup for "".
+  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "" })).toBe(DEFAULT_TLS_PROFILE);
+  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "   " })).toBe(DEFAULT_TLS_PROFILE);
+  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "  safari_ios_17_0  " })).toBe("safari_ios_17_0");
+});
+
+test("the default profile resolves to a real client identifier", () => {
+  expect(resolveClientIdentifier(DEFAULT_TLS_PROFILE)).toBeTruthy();
+});
+
+test("every profile named in the docs is a real client identifier", () => {
+  // Guards against documenting a profile that node-tls-client does not ship,
+  // which would only surface as a startup crash on an operator's VPS.
+  for (const profile of ["safari_ios_17_0", "safari_ios_18_0", "safari_16_0", "firefox_120"]) {
+    expect(resolveClientIdentifier(profile)).toBeTruthy();
+  }
+});
+
+test("an unknown profile fails loudly instead of falling back", () => {
+  // The dangerous failure mode is a silent fallback: to the default (hiding the
+  // typo) or to whatever the library picks (which could be Chrome). It must throw.
+  try {
+    resolveClientIdentifier("safari_ios_18_o"); // letter o, not zero
+    expect.unreachable();
+  } catch (e) {
+    expect(e).toBeInstanceOf(BmsError);
+    expect((e as BmsError).kind).toBe("unparseable");
+    expect((e as BmsError).message).toContain("BMS_TLS_PROFILE");
+  }
+});
+
+test("an empty profile name is rejected, not treated as 'use anything'", () => {
+  expect(() => resolveClientIdentifier("")).toThrow(BmsError);
 });

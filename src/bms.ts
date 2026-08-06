@@ -16,9 +16,46 @@
  */
 import * as tls from "node-tls-client";
 
-// ponytail: pinned profile, but kept as a named const so rotating it when
-// Cloudflare's scoring shifts is a one-line change rather than a hunt.
-const TLS_PROFILE = "safari_ios_18_0";
+// ponytail: pinned profile, but rotatable so an operator can react when
+// Cloudflare's scoring shifts without editing code and redeploying.
+//
+// The default is measured, not arbitrary — see the access findings doc quoted
+// in the file header. Only Safari/Firefox profiles are supported overrides;
+// Chrome profiles are served challenges by BookMyShow, so never make one the
+// default and never document one as an option.
+export const DEFAULT_TLS_PROFILE = "safari_ios_18_0";
+
+/**
+ * Which node-tls-client profile to open the session with.
+ *
+ * Read at init rather than at import, so a .env loaded by the host is picked up
+ * and tests can drive it. An unset, empty or whitespace-only value falls back
+ * to the pinned default; a non-empty one is taken at face value and validated
+ * by `resolveClientIdentifier`.
+ */
+export function resolveTlsProfile(env: Record<string, string | undefined> = process.env): string {
+  return env.BMS_TLS_PROFILE?.trim() || DEFAULT_TLS_PROFILE;
+}
+
+/**
+ * Map a profile name onto node-tls-client's identifier, failing loudly.
+ *
+ * A typo in BMS_TLS_PROFILE must stop the bot at startup, not silently fall
+ * back to the default (which would hide the misconfiguration) or to whatever
+ * the library picks by itself (which could be Chrome).
+ */
+export function resolveClientIdentifier(profile: string = resolveTlsProfile()): string {
+  const { ClientIdentifier } = tls as any;
+  const id = ClientIdentifier[profile];
+  if (!id) {
+    throw new BmsError(
+      "unparseable",
+      `unknown TLS profile "${profile}" — set BMS_TLS_PROFILE to a node-tls-client ` +
+        `ClientIdentifier key such as ${DEFAULT_TLS_PROFILE}, or unset it to use the default`,
+    );
+  }
+  return id;
+}
 
 export type Show = {
   sessionId: string;
@@ -62,10 +99,11 @@ export class BmsError extends Error {
 let session: any = null;
 
 export async function initBms(): Promise<void> {
-  const { Session, ClientIdentifier, initTLS } = tls as any;
+  const { Session, initTLS } = tls as any;
+  // Validate the profile before spinning up the native TLS layer, so a typo in
+  // BMS_TLS_PROFILE fails immediately and cheaply.
+  const id = resolveClientIdentifier();
   await initTLS();
-  const id = ClientIdentifier[TLS_PROFILE];
-  if (!id) throw new BmsError("unparseable", `unknown TLS profile ${TLS_PROFILE}`);
   session = new Session({ clientIdentifier: id, timeout: 30_000 });
 }
 
