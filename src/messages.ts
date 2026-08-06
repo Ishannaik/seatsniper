@@ -296,7 +296,7 @@ export function help() {
             name: "Limits",
             value:
               "Observes and notifies only — never buys or holds seats. " +
-              "Self-host: the host must complete Safari TLS to BookMyShow; a free serverless tier is not enough.",
+              "Self-hosting requires a host that can complete Safari TLS to BookMyShow; free serverless tiers are not guaranteed to work.",
           },
         )
         .setFooter({ text: "Checks every 10 minutes · 5 watches each" }),
