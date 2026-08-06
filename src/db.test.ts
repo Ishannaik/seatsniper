@@ -9,6 +9,8 @@ let seenVenues: typeof import("./db.ts").seenVenues;
 let recordSeenVenues: typeof import("./db.ts").recordSeenVenues;
 let recordSeenDates: typeof import("./db.ts").recordSeenDates;
 let shouldSilentSeedVenues: typeof import("./db.ts").shouldSilentSeedVenues;
+let removeWatch: typeof import("./db.ts").removeWatch;
+let seenDates: typeof import("./db.ts").seenDates;
 
 beforeAll(async () => {
   process.env.DB_PATH = dbPath;
@@ -18,6 +20,8 @@ beforeAll(async () => {
   recordSeenVenues = mod.recordSeenVenues;
   recordSeenDates = mod.recordSeenDates;
   shouldSilentSeedVenues = mod.shouldSilentSeedVenues;
+  removeWatch = mod.removeWatch;
+  seenDates = mod.seenDates;
 });
 
 beforeEach(() => {
@@ -74,4 +78,32 @@ test("shouldSilentSeedVenues is false after venues recorded", () => {
 test("shouldSilentSeedVenues is false for brand-new sub with no dates yet", () => {
   const id = addSubscriptionWatch();
   expect(shouldSilentSeedVenues(id)).toBe(false);
+});
+
+test("removeWatch cascades its seen_dates and seen_venues ledgers", () => {
+  const id = addSubscriptionWatch();
+  recordSeenDates(id, ["20260730", "20260731"]);
+  recordSeenVenues(id, ["MCIW"]);
+  expect(seenDates(id)).toHaveLength(2);
+  expect(seenVenues(id)).toHaveLength(1);
+
+  expect(removeWatch(id, "u1")).toBe(true);
+
+  // ON DELETE CASCADE only fires with PRAGMA foreign_keys = ON; without it
+  // these rows are orphaned and /stop leaks a row per date and venue.
+  expect(seenDates(id)).toEqual([]);
+  expect(seenVenues(id)).toEqual([]);
+});
+
+test("a rejected removeWatch leaves the ledgers intact", () => {
+  // removeWatch is scoped by user_id; another user's /stop must not delete
+  // anything, cascade included.
+  const id = addSubscriptionWatch();
+  recordSeenDates(id, ["20260730"]);
+  recordSeenVenues(id, ["MCIW"]);
+
+  expect(removeWatch(id, "someone-else")).toBe(false);
+
+  expect(seenDates(id)).toEqual(["20260730"]);
+  expect(seenVenues(id)).toEqual(["MCIW"]);
 });
