@@ -20,6 +20,7 @@ export type Watch = {
 
 const db = new Database(process.env.DB_PATH ?? "seatsniper.db", { create: true });
 db.exec("PRAGMA journal_mode = WAL");
+db.exec("PRAGMA foreign_keys = ON");
 db.exec(`
   CREATE TABLE IF NOT EXISTS watches (
     id          INTEGER PRIMARY KEY,

@@ -9,6 +9,8 @@ let seenVenues: typeof import("./db.ts").seenVenues;
 let recordSeenVenues: typeof import("./db.ts").recordSeenVenues;
 let recordSeenDates: typeof import("./db.ts").recordSeenDates;
 let shouldSilentSeedVenues: typeof import("./db.ts").shouldSilentSeedVenues;
+let seenDates: typeof import("./db.ts").seenDates;
+let removeWatch: typeof import("./db.ts").removeWatch;
 
 beforeAll(async () => {
   process.env.DB_PATH = dbPath;
@@ -18,6 +20,8 @@ beforeAll(async () => {
   recordSeenVenues = mod.recordSeenVenues;
   recordSeenDates = mod.recordSeenDates;
   shouldSilentSeedVenues = mod.shouldSilentSeedVenues;
+  seenDates = mod.seenDates;
+  removeWatch = mod.removeWatch;
 });
 
 beforeEach(() => {
@@ -74,4 +78,14 @@ test("shouldSilentSeedVenues is false after venues recorded", () => {
 test("shouldSilentSeedVenues is false for brand-new sub with no dates yet", () => {
   const id = addSubscriptionWatch();
   expect(shouldSilentSeedVenues(id)).toBe(false);
+});
+
+test("removeWatch cascades seen date and venue ledgers", () => {
+  const id = addSubscriptionWatch();
+  recordSeenDates(id, ["20260730"]);
+  recordSeenVenues(id, ["MCIW"]);
+
+  expect(removeWatch(id, "u1")).toBe(true);
+  expect(seenDates(id)).toEqual([]);
+  expect(seenVenues(id)).toEqual([]);
 });
