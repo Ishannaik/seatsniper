@@ -292,6 +292,12 @@ export function help() {
             name: "Manage",
             value: "`/list` — what you're watching\n`/stop id:3` — stop one",
           },
+          {
+            name: "Limits",
+            value:
+              "Observes and notifies only — never buys or holds seats. " +
+              "Self-host: the host must complete Safari TLS to BookMyShow; a free serverless tier is not enough.",
+          },
         )
         .setFooter({ text: "Checks every 10 minutes · 5 watches each" }),
     ],
