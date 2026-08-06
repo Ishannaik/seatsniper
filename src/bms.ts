@@ -16,9 +16,13 @@
  */
 import * as tls from "node-tls-client";
 
-// ponytail: pinned profile, but kept as a named const so rotating it when
-// Cloudflare's scoring shifts is a one-line change rather than a hunt.
-const TLS_PROFILE = "safari_ios_18_0";
+// ponytail: default stays pinned to a Safari profile. Operators can opt into
+// another valid node-tls-client Safari/Firefox profile via BMS_TLS_PROFILE.
+export function resolveTlsProfile(envValue: string | undefined): string {
+  return envValue?.trim() || "safari_ios_18_0";
+}
+
+const TLS_PROFILE = resolveTlsProfile(process.env.BMS_TLS_PROFILE);
 
 export type Show = {
   sessionId: string;

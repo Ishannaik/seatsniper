@@ -1,7 +1,16 @@
 import { expect, test } from "bun:test";
 import {
-  parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError,
+  parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, resolveTlsProfile, PROBE_DATE, BmsError,
 } from "./bms.ts";
+
+test("resolveTlsProfile defaults to the measured Safari profile", () => {
+  expect(resolveTlsProfile(undefined)).toBe("safari_ios_18_0");
+  expect(resolveTlsProfile("  ")).toBe("safari_ios_18_0");
+});
+
+test("resolveTlsProfile keeps a valid override after trimming", () => {
+  expect(resolveTlsProfile("  safari_ios_20_0 ")).toBe("safari_ios_20_0");
+});
 
 // Trimmed from a real 2026-07-27 response for The Odyssey (ET00480917, Mumbai).
 // Two shows on the 28th, one on the 27th — the exact shape BMS returns when it

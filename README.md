@@ -159,6 +159,7 @@ quietly forever.
 | `DISCORD_GUILD_ID` | no | | Register commands in one guild instantly instead of waiting ~1 h for global |
 | `POLL_INTERVAL_SEC` | no | `600` | Seconds between poll cycles |
 | `DB_PATH` | no | `seatsniper.db` | SQLite file location |
+| `BMS_TLS_PROFILE` | no | `safari_ios_18_0` | TLS profile for BookMyShow; Safari/Firefox keys only, never Chrome |
 | `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll |
 
 ## 🗺️ Project layout
