@@ -184,6 +184,17 @@ docs/            design specs and measured findings
   The measured findings behind this live in
   [`docs/superpowers/specs/2026-07-27-bms-access-findings.md`](docs/superpowers/specs/2026-07-27-bms-access-findings.md).
 
+## 🔧 Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `bun install` / TLS lib missing | Bun blocks trusted deps | `bun pm trust --all` |
+| HTTP 403 from BookMyShow | Chrome profile, bare curl, or wrong headers | Use the Safari profile only; read the [measured findings](docs/superpowers/specs/2026-07-27-bms-access-findings.md) |
+| "Need residential proxy?" | Prior-art myth | **No** for Safari TLS on a capable host; a measured Oracle datacenter works |
+| Slash commands missing | Global vs guild registration | Set `DISCORD_GUILD_ID` for instant guild commands |
+| DMs never arrive | User closed DMs | The bot falls back to a channel; open DMs with the bot |
+| Integration tests fail in CI | Live BookMyShow from US runners | Keep `integration.ts` manual and not part of CI |
+
 ## 🤝 Contributing
 
 Bug reports, feature ideas, and PRs are welcome. Start with
