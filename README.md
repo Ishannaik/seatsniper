@@ -12,6 +12,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/Ishannaik/seatsniper"></a>
   <a href=".github/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Ishannaik/seatsniper/ci.yml"></a>
+  <a href="https://github.com/Ishannaik/seatsniper/labels/good%20first%20issue"><img alt="Good first issues" src="https://img.shields.io/github/labels/Ishannaik/seatsniper/good%20first%20issue"></a>
   <img alt="Runtime: Bun 1.2" src="https://img.shields.io/badge/runtime-Bun%201.2-black">
   <img alt="Language: TypeScript" src="https://img.shields.io/badge/language-TypeScript-3178C6">
   <img alt="discord.js v14" src="https://img.shields.io/badge/discord.js-v14-5865F2">
