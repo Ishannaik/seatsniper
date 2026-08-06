@@ -158,12 +158,14 @@ is watched again, so 50 watches on one film cost roughly one request per cycle.
 `beginCycle()` clears that map at the start of every poll so an answer is never
 served across cycles.
 
-Format filters are intentionally the exception: a format-specific search must
-re-fetch showtimes for a fresh date, which costs an extra request. That is a
-deliberate tradeoff, not a bug.
+Format filters are intentionally the exception for subscription watches: each
+fresh date requires an additional showtimes request. Dated watches already have
+their showtimes and apply the format filter in memory. This is a deliberate
+tradeoff, not a bug.
 
-Coalescing reduces request volume on whatever egress you run. It is not the
-same as a residential IP; TLS fingerprinting is what matters to BookMyShow.
+Coalescing reduces request volume on whatever egress you run. It is not a
+substitute for suitable egress: BookMyShow checks the TLS fingerprint, and
+its geographic restrictions can still block datacenter IPs outside India.
 
 ## ⚙️ Configuration
 
