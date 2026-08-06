@@ -16,10 +16,28 @@
  */
 import * as tls from "node-tls-client";
 
+/** Anything that is not a confident, parsed answer. Never swallowed into `[]`. */
+export class BmsError extends Error {
+  constructor(
+    readonly kind: "network" | "blocked" | "unparseable" | "bad_url" | "not_found",
+    message: string,
+  ) {
+    super(message);
+    this.name = "BmsError";
+  }
+}
+
 // ponytail: default stays pinned to a Safari profile. Operators can opt into
 // another valid node-tls-client Safari/Firefox profile via BMS_TLS_PROFILE.
 export function resolveTlsProfile(envValue: string | undefined): string {
-  return envValue?.trim() || "safari_ios_18_0";
+  const profile = envValue?.trim() || "safari_ios_18_0";
+  if (!/^(safari|firefox)_/i.test(profile)) {
+    throw new BmsError(
+      "unparseable",
+      `unsupported TLS profile ${profile}; use a Safari or Firefox profile`,
+    );
+  }
+  return profile;
 }
 
 const TLS_PROFILE = resolveTlsProfile(process.env.BMS_TLS_PROFILE);
@@ -51,17 +69,6 @@ export type Target = {
   eventCode: string; // "ET00480917"
   date: string; // YYYYMMDD
 };
-
-/** Anything that is not a confident, parsed answer. Never swallowed into `[]`. */
-export class BmsError extends Error {
-  constructor(
-    readonly kind: "network" | "blocked" | "unparseable" | "bad_url" | "not_found",
-    message: string,
-  ) {
-    super(message);
-    this.name = "BmsError";
-  }
-}
 
 let session: any = null;
 

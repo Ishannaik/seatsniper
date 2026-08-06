@@ -12,6 +12,17 @@ test("resolveTlsProfile keeps a valid override after trimming", () => {
   expect(resolveTlsProfile("  safari_ios_20_0 ")).toBe("safari_ios_20_0");
 });
 
+test("resolveTlsProfile accepts Safari and Firefox overrides", () => {
+  expect(resolveTlsProfile("safari_ipad_15_6")).toBe("safari_ipad_15_6");
+  expect(resolveTlsProfile("firefox_133")).toBe("firefox_133");
+});
+
+test("resolveTlsProfile rejects Chrome and unknown profiles", () => {
+  expect(() => resolveTlsProfile("chrome_131")).toThrow(/Safari or Firefox/);
+  expect(() => resolveTlsProfile("chrome")).toThrow(/Safari or Firefox/);
+  expect(() => resolveTlsProfile("edge_120")).toThrow(/Safari or Firefox/);
+});
+
 // Trimmed from a real 2026-07-27 response for The Odyssey (ET00480917, Mumbai).
 // Two shows on the 28th, one on the 27th — the exact shape BMS returns when it
 // substitutes the nearest bookable date for one that isn't open.
