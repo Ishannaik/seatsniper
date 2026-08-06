@@ -60,7 +60,7 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 | --- | --- |
 | 📅 **Watch one date** | One DM the moment that date opens. The watch then deletes itself. No spam. |
 | 🎬 **Subscribe to a movie** | `date:any` = a DM every time a new date unlocks or a new cinema appears. |
-| 🎥 **Format + day filters** | Only ping for the screens you care about: `format:IMAX,4DX` matches by name, `days:fri,sat` by weekday. |
+| 🎥 **Format + day filters** | Only ping for the screens you care about: `format:IMAX,4DX` matches by name (ScreenX spelling is flexible, e.g. `SCREENX` or `SCREEN X`), `days:fri,sat` by weekday. |
 | ✅ **Validates at creation** | The link is checked against the live site when you save it, so a broken watch fails immediately, not silently. |
 | ⚡ **One request per movie** | 50 watches on the same movie cost the same as 1. Coalesced polling keeps BookMyShow happy. |
 | 📱 **User-install commands** | Works in DMs and servers, installs straight to your account. |
