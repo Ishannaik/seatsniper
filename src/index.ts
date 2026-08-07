@@ -10,11 +10,14 @@ import {
   seenDates, recordSeenDates, seenVenues, recordSeenVenues, shouldSilentSeedVenues,
   isSubscription, SUBSCRIPTION, MAX_WATCHES_PER_USER, type Watch,
 } from "./db.ts";
+import { staggerBounds, staggerDelayMs } from "./stagger.ts";
 
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) throw new Error("DISCORD_TOKEN missing — copy .env.example to .env");
 
 const POLL_MS = Number(process.env.POLL_INTERVAL_SEC ?? 600) * 1000;
+
+const STAGGER = staggerBounds();
 
 /** Optional Uptime Kuma Push URL. Bot pings it after each poll so Kuma can alert if we die. */
 const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL?.trim() || "";
@@ -406,7 +409,8 @@ async function poll() {
     if (await expireStale(w)) continue;
     await checkWatch(w);
     // Stagger so we never burst. Cheap insurance against looking automated.
-    await Bun.sleep(2000 + Math.random() * 3000);
+    // Tunable via STAGGER_MS_MIN / STAGGER_MS_MAX; defaults are the previous 2000-5000ms.
+    await Bun.sleep(staggerDelayMs(STAGGER));
   }
   const elapsed = Date.now() - started;
   const saved = coalescedCount();
