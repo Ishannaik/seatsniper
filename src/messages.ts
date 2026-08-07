@@ -287,8 +287,9 @@ export function help() {
               "```/watch link:<paste> format:IMAX,4DX days:fri,sat,sun```" +
               "Optional. Only pings when a matching show appears. " +
               "Formats: IMAX, 4DX, ScreenX, 3D, 2D, MX4D, Dolby Atmos…\n" +
-              "_`format:` filters date and showtime alerts. " +
-              "**New cinema** alerts are not format-filtered._",
+              "_Both filter date and showtime alerts only. " +
+              "**New cinema** alerts are never filtered — a new venue pings you whatever " +
+              "format or day it lists._",
           },
           {
             name: "Manage",
