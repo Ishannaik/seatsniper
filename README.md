@@ -169,8 +169,10 @@ src/
   index.ts      bot, poll loop, slash handlers
   bms.ts        BookMyShow client, URL parsing, availability
   db.ts         SQLite: watches, seen dates, seen venues
+  filters.ts    format and day match helpers
   messages.ts   Discord copy and embeds
   register.ts   slash command registration
+  *.test.ts     unit test suites
 assets/          logo
 docs/            design specs and measured findings
 ```

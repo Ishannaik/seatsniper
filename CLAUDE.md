@@ -30,10 +30,11 @@ Deployed on Oracle VPS under pm2 (`bun run src/index.ts`). Bun auto-loads `.env`
 src/
   index.ts      bot + poll loop + slash handlers
   bms.ts        BookMyShow client, URL parse, availability
-  bms.test.ts
   db.ts         SQLite watches + seen_dates + seen_venues
+  filters.ts    format / day match helpers
   messages.ts   Discord copy / embeds
   register.ts   slash command registration
+  *.test.ts     unit tests
 docs/superpowers/specs/   design + measured BMS findings
 ```
 
