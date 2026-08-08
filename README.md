@@ -252,6 +252,17 @@ docs/            design specs and measured findings
 | DMs never arrive | User closed DMs | The bot falls back to a channel; open DMs with the bot |
 | Integration tests fail in CI | Live BookMyShow from US runners | Keep `integration.ts` manual and not part of CI |
 
+## ⚠️ Limitations & hosting
+
+- **One shared hosted instance concentrates ban risk.** A single public bot is
+  one IP ban away from going dark, and multi-tenant "forever free" bots are
+  fragile.
+- **SeatSniper is observe-only.** It never buys or holds tickets, by design.
+
+When it will break: Cloudflare may harden the Safari handshake, an abused IP
+can lose reputation even with a valid profile, and a BookMyShow HTML reshape
+can surface as a `BmsError` or as silence until the parser is updated.
+
 ## 🤝 Contributing
 
 Bug reports, feature ideas, and PRs are welcome. Start with
