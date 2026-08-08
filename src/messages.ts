@@ -84,7 +84,15 @@ function groupedTimeList(shows: Show[], venueLimit = 6, timesPerVenue = 4): stri
   }
   const extraVenues = venues.length - lines.length;
   let value = lines.join("\n\n") + (extraVenues > 0 ? `\n_+${extraVenues} more theatres_` : "");
-  if (value.length > maxFieldValue) value = lines.join("\n\n");
+  if (value.length > maxFieldValue && extraVenues > 0) {
+    const suffix = `\n_+${extraVenues} more theatres_`;
+    let truncated = lines.join("\n\n");
+    while (truncated.length + suffix.length > maxFieldValue) {
+      lines.pop();
+      truncated = lines.join("\n\n");
+    }
+    value = truncated + suffix;
+  }
   return value || timeList(shows);
 }
 
