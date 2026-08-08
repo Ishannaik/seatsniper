@@ -1,7 +1,65 @@
 import { expect, test } from "bun:test";
-import { LIVE, newCinemas, subscriptionAlert } from "./messages.ts";
+import type { Show } from "./bms.ts";
+import { LIVE, newCinemas, subscriptionAlert, ticketsLive } from "./messages.ts";
 
 const URL = "https://in.bookmyshow.com/movies/mumbai/foo/buytickets/ET00000001";
+
+function show(venueCode: string, venueName: string, epoch = 0, attributes = ""): Show {
+  return {
+    sessionId: "s",
+    availStatus: "",
+    showDateCode: "20260728",
+    showTime: "06:40 AM",
+    attributes,
+    epoch,
+    venueCode,
+    venueName,
+  };
+}
+
+test("ticketsLive groups showtimes under theatre headings", () => {
+  const { embeds } = ticketsLive({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [
+      show("PVRJ", "PVR: Juhu", 1000, "IMAX"),
+      show("MCIW", "Miraj Cinemas: IMAX, Wadala", 1000),
+    ],
+    url: URL,
+  });
+  const value = embeds[0]!.data.fields?.find((field) => field.name === "Showtimes")?.value ?? "";
+  expect(value).toContain("**PVR: Juhu**");
+  expect(value).toContain("**Miraj Cinemas: IMAX, Wadala**");
+  expect(value).toContain("IMAX");
+});
+
+test("ticketsLive keeps the same wall-clock time for different theatres", () => {
+  const { embeds } = ticketsLive({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [
+      show("PVRJ", "PVR: Juhu", 1000),
+      show("MCIW", "Miraj Cinemas: IMAX, Wadala", 1000),
+    ],
+    url: URL,
+  });
+  const value = embeds[0]!.data.fields?.find((field) => field.name === "Showtimes")?.value ?? "";
+  expect((value.match(/<t:1000:t>/g) ?? []).length).toBe(2);
+});
+
+test("ticketsLive falls back to venue code when venueName is empty", () => {
+  const { embeds } = ticketsLive({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [show("PVRJ", "", 1000)],
+    url: URL,
+  });
+  const value = embeds[0]!.data.fields?.find((field) => field.name === "Showtimes")?.value ?? "";
+  expect(value).toContain("**PVRJ**");
+});
 
 test("newCinemas lists venue names and uses LIVE alert colour", () => {
   const { embeds } = newCinemas({
