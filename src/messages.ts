@@ -61,6 +61,7 @@ function timeList(shows: Show[], limit = 8): string {
 
 /** Showtimes grouped by theatre, so a live DM reads by venue instead of one flat list. */
 function groupedTimeList(shows: Show[], venueLimit = 6, timesPerVenue = 4): string {
+  const maxFieldValue = 1024;
   const byVenue = new Map<string, { name: string; times: string[] }>();
   for (const s of shows) {
     const key = s.venueCode || s.venueName || "Other";
@@ -72,14 +73,19 @@ function groupedTimeList(shows: Show[], venueLimit = 6, timesPerVenue = 4): stri
   }
 
   const venues = [...byVenue.values()];
-  const shown = venues.slice(0, venueLimit);
-  const lines = shown.map((venue) => {
+  const lines: string[] = [];
+  for (const venue of venues.slice(0, venueLimit)) {
     const extraTimes = venue.times.length - timesPerVenue;
     const times = venue.times.slice(0, timesPerVenue).join(" · ");
-    return `**${venue.name}**\n${times}${extraTimes > 0 ? ` _+${extraTimes} more_` : ""}`;
-  });
-  const extraVenues = venues.length - shown.length;
-  return lines.join("\n\n") + (extraVenues > 0 ? `\n_+${extraVenues} more theatres_` : "");
+    const line = `**${venue.name}**\n${times}${extraTimes > 0 ? ` _+${extraTimes} more_` : ""}`;
+    const candidate = lines.length ? `${lines.join("\n\n")}\n\n${line}` : line;
+    if (candidate.length > maxFieldValue) break;
+    lines.push(line);
+  }
+  const extraVenues = venues.length - lines.length;
+  let value = lines.join("\n\n") + (extraVenues > 0 ? `\n_+${extraVenues} more theatres_` : "");
+  if (value.length > maxFieldValue) value = lines.join("\n\n");
+  return value || timeList(shows);
 }
 
 const formatsOf = (shows: Show[]) =>

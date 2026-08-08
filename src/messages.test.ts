@@ -61,6 +61,31 @@ test("ticketsLive falls back to venue code when venueName is empty", () => {
   expect(value).toContain("**PVRJ**");
 });
 
+test("ticketsLive keeps grouped showtimes within Discord field limit", () => {
+  const longName =
+    "PVR: A very long cinema name with IMAX and Dolby Atmos in Mumbai plus additional venue details and hall numbers";
+  const shows = Array.from({ length: 6 }, (_, venueIndex) =>
+    Array.from({ length: 4 }, (_, timeIndex) =>
+      show(
+        `V${venueIndex}`,
+        `${longName} ${venueIndex}`,
+        1000 + venueIndex * 3600 + timeIndex * 60,
+        "IMAX",
+      ),
+    ),
+  ).flat();
+  const { embeds } = ticketsLive({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows,
+    url: URL,
+  });
+  const value = embeds[0]!.data.fields?.find((field) => field.name === "Showtimes")?.value ?? "";
+  expect(value.length).toBeLessThanOrEqual(1024);
+  expect(value).toMatch(/more theatres/);
+});
+
 test("newCinemas lists venue names and uses LIVE alert colour", () => {
   const { embeds } = newCinemas({
     title: "The Odyssey",
