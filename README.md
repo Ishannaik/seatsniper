@@ -79,6 +79,11 @@ pm2:
 curl -fsSL https://raw.githubusercontent.com/Ishannaik/seatsniper/main/install.sh | bash
 ```
 
+> `install.sh` supports Linux and macOS. On Windows, use the Manual setup or
+> Docker instructions below. A datacenter VPS in India can work with Safari TLS
+> to BookMyShow, while a residential home IP is optional, not required. See the
+> [measured findings](docs/superpowers/specs/2026-07-27-bms-access-findings.md).
+
 Non-interactive, for CI or a box with no terminal:
 
 ```bash
