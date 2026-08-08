@@ -48,6 +48,15 @@ test("an unparseable value falls back and says so", () => {
   expect(lines[0]).toContain("abc");
 });
 
+test("a numeric non-finite value falls back and says so", () => {
+  // "abc" is NaN, but "Infinity" parses to a real number that is still not a delay.
+  // Pinned separately so a guard narrowed to NaN cannot hand Bun.sleep an infinite wait.
+  const { warn, lines } = recorder();
+  expect(staggerBounds({ STAGGER_MS_MAX: "Infinity" }, warn)).toEqual({ minMs: 2000, maxMs: 5000 });
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain("STAGGER_MS_MAX");
+});
+
 test("a negative value falls back rather than shortening the cycle", () => {
   const { warn, lines } = recorder();
   expect(staggerBounds({ STAGGER_MS_MAX: "-1" }, warn)).toEqual({ minMs: 2000, maxMs: 5000 });
