@@ -37,16 +37,36 @@ export function resolveTlsProfile(env: Record<string, string | undefined> = proc
   return env.BMS_TLS_PROFILE?.trim() || DEFAULT_TLS_PROFILE;
 }
 
+/** Profile families BookMyShow serves without a challenge. */
+const SUPPORTED_TLS_FAMILIES = ["safari", "firefox"] as const;
+
 /**
  * Map a profile name onto node-tls-client's identifier, failing loudly.
  *
  * A typo in BMS_TLS_PROFILE must stop the bot at startup, not silently fall
  * back to the default (which would hide the misconfiguration) or to whatever
  * the library picks by itself (which could be Chrome).
+ *
+ * Being a real ClientIdentifier key is not enough. node-tls-client ships Chrome
+ * profiles too, and BookMyShow serves those Cloudflare challenges — a bot
+ * started on one polls forever and never notifies. So the allowlist is by
+ * family, not by "does the library know this name".
  */
 export function resolveClientIdentifier(profile: string = resolveTlsProfile()): string {
+  const name = profile.trim();
   const { ClientIdentifier } = tls as any;
-  const id = ClientIdentifier[profile];
+  const id = ClientIdentifier[name];
+  const supported = SUPPORTED_TLS_FAMILIES.some((family) => name.startsWith(family));
+
+  if (!supported) {
+    throw new BmsError(
+      "unparseable",
+      `unsupported TLS profile "${profile}" — BookMyShow serves challenges to anything ` +
+        `but Safari and Firefox fingerprints. Set BMS_TLS_PROFILE to a ${SUPPORTED_TLS_FAMILIES.join(
+          "/",
+        )} ClientIdentifier key such as ${DEFAULT_TLS_PROFILE}, or unset it to use the default`,
+    );
+  }
   if (!id) {
     throw new BmsError(
       "unparseable",

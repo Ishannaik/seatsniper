@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import * as tls from "node-tls-client";
 import {
   parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError,
   DEFAULT_TLS_PROFILE, resolveTlsProfile, resolveClientIdentifier,
@@ -227,4 +228,34 @@ test("an unknown profile fails loudly instead of falling back", () => {
 
 test("an empty profile name is rejected, not treated as 'use anything'", () => {
   expect(() => resolveClientIdentifier("")).toThrow(BmsError);
+});
+
+test("a Chrome profile is rejected even though node-tls-client ships it", () => {
+  // The library knowing the name is not the bar: BookMyShow serves Chrome
+  // fingerprints Cloudflare challenges, so a bot started on one polls forever
+  // and never notifies. Failing at startup is the only visible failure.
+  const { ClientIdentifier } = tls as any;
+  expect(ClientIdentifier.chrome_120).toBeTruthy(); // the library really does have it
+
+  try {
+    resolveClientIdentifier("chrome_120");
+    expect.unreachable();
+  } catch (e) {
+    expect(e).toBeInstanceOf(BmsError);
+    expect((e as BmsError).kind).toBe("unparseable");
+    expect((e as BmsError).message).toContain("BMS_TLS_PROFILE");
+  }
+});
+
+test("every Chrome-family profile the library ships is rejected", () => {
+  const { ClientIdentifier } = tls as any;
+  const chromeKeys = Object.keys(ClientIdentifier).filter((k) => k.startsWith("chrome"));
+  expect(chromeKeys.length).toBeGreaterThan(0);
+  for (const key of chromeKeys) {
+    expect(() => resolveClientIdentifier(key)).toThrow(BmsError);
+  }
+});
+
+test("an unsupported profile is rejected on padding too, not just exact spelling", () => {
+  expect(() => resolveClientIdentifier("  chrome_120  ")).toThrow(BmsError);
 });
