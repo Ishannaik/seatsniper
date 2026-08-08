@@ -36,7 +36,9 @@ You tell it a BookMyShow link and a date. It polls the site, and the moment that
 date is bookable you get one DM. Say `date:any` instead and it pings you every
 time a *new* date unlocks or a *new* cinema starts showing the movie. Trim the
 noise with filters: `format:IMAX,4DX` only pings for those screens, and
-`days:fri,sat` only on those weekdays.
+`days:fri,sat` only on those weekdays. (`format:` filters date and showtime
+alerts; "new cinema appeared" alerts are not format-filtered — see
+[Commands](#commands).)
 
 Works for movies, concerts, plays, any event BookMyShow lists in India.
 
@@ -61,7 +63,7 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 | --- | --- |
 | 📅 **Watch one date** | One DM the moment that date opens. The watch then deletes itself. No spam. |
 | 🎬 **Subscribe to a movie** | `date:any` = a DM every time a new date unlocks or a new cinema appears. |
-| 🎥 **Format + day filters** | Only ping for the screens you care about: `format:IMAX,4DX` matches by name (ScreenX spelling is flexible, e.g. `SCREENX` or `SCREEN X`), `days:fri,sat` by weekday. |
+| 🎥 **Format + day filters** | Only ping for the screens you care about: `format:IMAX,4DX` matches by name (ScreenX spelling is flexible, e.g. `SCREENX` or `SCREEN X`), `days:fri,sat` by weekday. Both filter date and showtime alerts; new-cinema alerts are not format-filtered. |
 | ✅ **Validates at creation** | The link is checked against the live site when you save it, so a broken watch fails immediately, not silently. |
 | ⚡ **One request per movie** | 50 watches on the same movie cost the same as 1. Coalesced polling keeps BookMyShow happy. |
 | 📱 **User-install commands** | Works in DMs and servers, installs straight to your account. |
@@ -125,6 +127,8 @@ pm2 save
 Bun auto-loads `.env` from the working directory.
 </details>
 
+<a id="commands"></a>
+
 ## 🎮 Commands
 
 | Command | What it does |
@@ -135,6 +139,16 @@ Bun auto-loads `.env` from the working directory.
 | `/list` | Show your active watches |
 | `/stop id:<n>` | Stop watch `n` from `/list` |
 | `/help` | How the bot works |
+
+> **What `format:` does and does not cover.** A subscription (`date:any`) can alert
+> on two different things: a **new date** opening, and a **new cinema** starting to
+> list the film. `format:` is enforced on the new-date half — the bot re-fetches
+> showtimes for each fresh date and drops the ones with no matching show. It is
+> **not** enforced on the new-cinema half: fresh venues are detected by venue code
+> alone, so a new cinema listing the film in any format still produces a DM. The
+> filter line on that DM reflects the filters you set, not a format that was checked
+> for the cinema. `days:` behaves the same way — it applies to dates, and a cinema is
+> not a date.
 
 Each user can hold up to 5 watches.
 

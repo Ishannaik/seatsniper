@@ -192,6 +192,13 @@ async function checkSubscription(w: Watch) {
   markOk(w.id);
 
   // null venues = parse failed; skip cinema diff (don't treat as "no cinemas").
+  //
+  // NOTE: fresh venues are diffed by venue code only — format_filter and day_filter are
+  // NOT applied here, unlike the freshDates path below. A new cinema listing the film in
+  // any format still alerts, and the DM's filter line reflects the watch's filters rather
+  // than a format checked for the cinema. Documented in the README Commands section.
+  // Filtering this half needs showtimes-or-attributes per venue plus careful coalescing,
+  // so it is a deliberate gap rather than an oversight (see issue #21).
   let freshVenues: { code: string; name: string }[] = [];
   if (venues) {
     if (shouldSilentSeedVenues(w.id)) {
