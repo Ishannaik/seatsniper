@@ -4,6 +4,8 @@ services:
     container_name: seatsniper
     restart: unless-stopped
     env_file: .env
+    # There is no HTTP healthcheck yet. "Container up" is not proof of a
+    # healthy Discord login or polling; monitor via UPTIME_KUMA_PUSH_URL.
     environment:
       - DB_PATH=/data/seatsniper.db
     volumes:

@@ -63,7 +63,7 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 | --- | --- |
 | 📅 **Watch one date** | One DM the moment that date opens. The watch then deletes itself. No spam. |
 | 🎬 **Subscribe to a movie** | `date:any` = a DM every time a new date unlocks or a new cinema appears. |
-| 🎥 **Format + day filters** | Only ping for the screens you care about: `format:IMAX,4DX` matches by name, `days:fri,sat` by weekday. Both filter date and showtime alerts; new-cinema alerts are not format-filtered. |
+| 🎥 **Format + day filters** | Only ping for the screens you care about: `format:IMAX,4DX` matches by name (ScreenX spelling is flexible, e.g. `SCREENX` or `SCREEN X`), `days:fri,sat` by weekday. Both filter date and showtime alerts; new-cinema alerts are not format-filtered. |
 | ✅ **Validates at creation** | The link is checked against the live site when you save it, so a broken watch fails immediately, not silently. |
 | ⚡ **One request per movie** | 50 watches on the same movie cost the same as 1. Coalesced polling keeps BookMyShow happy. |
 | 📱 **User-install commands** | Works in DMs and servers, installs straight to your account. |
@@ -102,6 +102,11 @@ docker compose up -d
 
 The database lives in a named volume, so the bot survives container restarts.
 
+There is no HTTP healthcheck. `docker compose ps` showing "up" only means the
+process is running, not that the bot is logged in and polling. Configure
+`UPTIME_KUMA_PUSH_URL`; the bot pings it after each poll, so a missing push
+means polling stopped even if the container is still up.
+
 ## 📦 Manual setup
 
 ```bash
@@ -121,6 +126,8 @@ pm2 save
 
 Bun auto-loads `.env` from the working directory.
 </details>
+
+<a id="commands"></a>
 
 ## 🎮 Commands
 
@@ -163,6 +170,23 @@ Failure is never silence. A blocked or unparseable response throws and logs;
 after 3 consecutive failures the bot tells you, so a dead poller cannot sit
 quietly forever.
 
+### Request coalescing
+
+Within one poll cycle, the bot keeps a map keyed by movie (city + event).
+`bookableDatesCached` returns the cached BookMyShow response when the same movie
+is watched again, so 50 watches on one film cost roughly one request per cycle.
+`beginCycle()` clears that map at the start of every poll so an answer is never
+served across cycles.
+
+Format filters are intentionally the exception for subscription watches: each
+fresh date requires an additional showtimes request. Dated watches already have
+their showtimes and apply the format filter in memory. This is a deliberate
+tradeoff, not a bug.
+
+Coalescing reduces request volume on whatever egress you run. It is not a
+substitute for suitable egress: BookMyShow checks the TLS fingerprint, and
+its geographic restrictions can still block datacenter IPs outside India.
+
 ## ⚙️ Configuration
 
 | Variable | Required | Default | Purpose |
@@ -170,9 +194,14 @@ quietly forever.
 | `DISCORD_TOKEN` | yes | | Bot token from the Discord developer portal |
 | `DISCORD_CLIENT_ID` | yes | | Application ID from the same page |
 | `DISCORD_GUILD_ID` | no | | Register commands in one guild instantly instead of waiting ~1 h for global |
-| `POLL_INTERVAL_SEC` | no | `600` | Seconds between poll cycles |
+| `POLL_INTERVAL_SEC` | no | `600` | Seconds between poll cycles (recommend at least 120-300 for personal use) |
 | `DB_PATH` | no | `seatsniper.db` | SQLite file location |
 | `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll |
+
+Keep `POLL_INTERVAL_SEC` at or above 120-300 seconds for personal use. Faster
+polls do **not** require a residential IP; they increase request volume and
+ban/rate-limit risk on any IP class. The default of 600 remains the safe
+baseline.
 
 ## 🗺️ Project layout
 
@@ -195,6 +224,17 @@ docs/            design specs and measured findings
 - **No heuristics.** Availability is a field comparison, not a scrape-and-guess.
   The measured findings behind this live in
   [`docs/superpowers/specs/2026-07-27-bms-access-findings.md`](docs/superpowers/specs/2026-07-27-bms-access-findings.md).
+
+## 🔧 Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `bun install` / TLS lib missing | Bun blocks trusted deps | `bun pm trust --all` |
+| HTTP 403 from BookMyShow | Chrome profile, bare curl, or wrong headers | Use the Safari profile only; read the [measured findings](docs/superpowers/specs/2026-07-27-bms-access-findings.md) |
+| "Need residential proxy?" | Prior-art myth | **No** for Safari TLS on a capable host; a measured Oracle datacenter works |
+| Slash commands missing | Global vs guild registration | Set `DISCORD_GUILD_ID` for instant guild commands |
+| DMs never arrive | User closed DMs | The bot falls back to a channel; open DMs with the bot |
+| Integration tests fail in CI | Live BookMyShow from US runners | Keep `integration.ts` manual and not part of CI |
 
 ## 🤝 Contributing
 
