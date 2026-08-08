@@ -181,6 +181,8 @@ its geographic restrictions can still block datacenter IPs outside India.
 | `DISCORD_CLIENT_ID` | yes | | Application ID from the same page |
 | `DISCORD_GUILD_ID` | no | | Register commands in one guild instantly instead of waiting ~1 h for global |
 | `POLL_INTERVAL_SEC` | no | `600` | Seconds between poll cycles (recommend at least 120-300 for personal use) |
+| `STAGGER_MS_MIN` | no | `2000` | Shortest pause between two watches inside one cycle |
+| `STAGGER_MS_MAX` | no | `5000` | Longest pause between two watches inside one cycle |
 | `DB_PATH` | no | `seatsniper.db` | SQLite file location |
 | `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll |
 | `BMS_TLS_PROFILE` | no | `safari_ios_18_0` | `node-tls-client` profile for the BookMyShow session. Rotate only between **Safari/Firefox** profiles if Cloudflare starts blocking (see [BookMyShow quirks](#bookmyshow-quirks)). Chrome profiles are rejected, not merely discouraged. An unknown or unsupported name fails at startup. |
@@ -190,6 +192,18 @@ polls do **not** require a residential IP; they increase request volume and
 ban/rate-limit risk on any IP class. The default of 600 remains the safe
 baseline.
 
+`POLL_INTERVAL_SEC` spaces the cycles apart; the stagger spaces the watches
+*inside* one cycle. Each watch is followed by a random pause drawn uniformly from
+`[STAGGER_MS_MIN, STAGGER_MS_MAX)`. That is anti-burst insurance against looking
+automated, so **setting both to `0` is allowed but discouraged** — it removes the only
+thing spacing your requests out, at a rate-limit and bot-signature risk. Same point as
+above: it is not a residential-IP question, since fingerprint and request shape matter
+more than where the traffic comes from.
+
+An unparseable or negative value is not fatal — the bot logs a `[config]` warning and
+uses the default. A `STAGGER_MS_MAX` below `STAGGER_MS_MIN` is raised to the minimum,
+giving a fixed delay, rather than being silently swapped.
+
 ## 🗺️ Project layout
 
 ```
@@ -198,6 +212,7 @@ src/
   bms.ts        BookMyShow client, URL parsing, availability
   db.ts         SQLite: watches, seen dates, seen venues
   messages.ts   Discord copy and embeds
+  stagger.ts    inter-watch stagger config (STAGGER_MS_MIN / STAGGER_MS_MAX)
   register.ts   slash command registration
 assets/          logo
 docs/            design specs and measured findings
