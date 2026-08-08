@@ -67,9 +67,10 @@ function theatreList(shows: Show[], limit = 6): string {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const s of shows) {
-    if (seen.has(s.venueCode)) continue;
-    seen.add(s.venueCode);
-    if (out.length < limit) out.push(s.venueName || s.venueCode);
+    const key = s.venueCode || s.venueName;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    if (out.length < limit) out.push(s.venueName || key);
   }
   const extra = seen.size - out.length;
   return out.join(" · ") + (extra > 0 ? ` _+${extra} more_` : "");

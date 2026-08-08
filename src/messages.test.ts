@@ -31,6 +31,20 @@ test("alreadyOnSale includes theatre names when venues are present", () => {
   expect(theatres?.value).toContain("Miraj Cinemas: IMAX, Wadala");
 });
 
+test("alreadyOnSale keeps named venues when venue codes are empty", () => {
+  const { embeds } = alreadyOnSale({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [show("", "PVR: Juhu"), show("", "Miraj Cinemas: IMAX, Wadala")],
+    url: URL,
+  });
+  const embed = embeds[0]!.data;
+  const theatres = embed.fields?.find((field) => field.name === "Theatres");
+  expect(theatres?.value).toContain("PVR: Juhu");
+  expect(theatres?.value).toContain("Miraj Cinemas: IMAX, Wadala");
+});
+
 test("newCinemas lists venue names and uses LIVE alert colour", () => {
   const { embeds } = newCinemas({
     title: "The Odyssey",
