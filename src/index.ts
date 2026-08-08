@@ -14,6 +14,7 @@ import {
   FORMAT_CHOICES, DAY_CHOICES, normaliseFormats, normaliseDays, matchesFormat,
   matchesDay, filterSummary,
 } from "./filters.ts";
+import { runWatchCycle } from "./poll-cycle.ts";
 import { staggerBounds, staggerDelayMs } from "./stagger.ts";
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -373,8 +374,7 @@ async function poll() {
   }
   beginCycle(); // fresh coalescing map; never serves an answer across polls
   for (const w of watches) {
-    if (await expireStale(w)) continue;
-    await checkWatch(w);
+    await runWatchCycle(w, { expireStale, checkWatch });
     // Stagger so we never burst. Cheap insurance against looking automated.
     // Tunable via STAGGER_MS_MIN / STAGGER_MS_MAX; defaults are the previous 2000-5000ms.
     await Bun.sleep(staggerDelayMs(STAGGER));
