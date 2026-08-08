@@ -257,7 +257,9 @@ docs/            design specs and measured findings
 Bug reports, feature ideas, and PRs are welcome. Start with
 [CONTRIBUTING.md](CONTRIBUTING.md), which covers the setup and the hard
 constraints the bot was built around. Report security issues privately, see
-[SECURITY.md](SECURITY.md).
+[SECURITY.md](SECURITY.md). New contributors can start at the
+[good first issues](https://github.com/Ishannaik/seatsniper/labels/good%20first%20issue)
+label.
 
 ## 📄 License
 

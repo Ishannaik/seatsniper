@@ -17,6 +17,16 @@ bun test
 `bun run commands` with `DISCORD_GUILD_ID` set registers instantly in one
 guild; without it, registration goes global and takes about an hour.
 
+## Good first issues
+
+Ready work is labeled
+[`good first issue`](https://github.com/Ishannaik/seatsniper/labels/good%20first%20issue).
+Most of those issues need no Discord token and no live BookMyShow access.
+
+Before you pick one up, remember the hard constraints below: Safari TLS only,
+errors are never silent `[]`, and the poller is not a headless browser. The
+gate before opening a PR is `bun test`.
+
 ## Hard constraints (do not regress)
 
 The full write-up is in
