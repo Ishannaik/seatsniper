@@ -2,7 +2,7 @@
 export function parseTimeFilter(value: string): number | null {
   const raw = value.trim().toLowerCase();
 
-  const match24 = raw.match(/^(\d{1,2}):(\d{2})$/);
+  const match24 = raw.match(/^(\d{2}):(\d{2})$/);
   if (match24) {
     const hours = Number(match24[1]);
     const minutes = Number(match24[2]);

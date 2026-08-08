@@ -20,6 +20,7 @@ describe("parseTimeFilter", () => {
   });
 
   test("rejects invalid times", () => {
+    expect(parseTimeFilter("6:00")).toBeNull();
     expect(parseTimeFilter("25:00")).toBeNull();
     expect(parseTimeFilter("12:60")).toBeNull();
     expect(parseTimeFilter("13:00 PM")).toBeNull();
