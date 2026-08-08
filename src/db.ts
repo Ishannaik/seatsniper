@@ -20,6 +20,10 @@ export type Watch = {
 
 const db = new Database(process.env.DB_PATH ?? "seatsniper.db", { create: true });
 db.exec("PRAGMA journal_mode = WAL");
+// SQLite ignores REFERENCES clauses unless this is on, per connection. The
+// ledger tables below declare ON DELETE CASCADE, so without it /stop deletes
+// the watch and leaves its seen_dates/seen_venues rows behind forever.
+db.exec("PRAGMA foreign_keys = ON");
 db.exec(`
   CREATE TABLE IF NOT EXISTS watches (
     id          INTEGER PRIMARY KEY,
