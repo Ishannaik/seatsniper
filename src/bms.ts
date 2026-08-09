@@ -406,7 +406,15 @@ export function parseBookableDates(html: string): string[] {
   return [...dates].sort();
 }
 
-/** "20260730" -> "Thu 30 Jul" */
+/**
+ * "20260730" -> "Thu, 30 Jul".
+ *
+ * Builds the date in local time and formats it in local time, so the day never
+ * shifts across timezones. Assumes a well-formed BMS date code: callers must
+ * not pass the empty date a subscription watch carries (see `SUBSCRIPTION`),
+ * because `Number("")` is 0 and that formats as a plausible-looking 1899 date
+ * rather than failing. Pinned in `bms.test.ts`.
+ */
 export function prettyDate(yyyymmdd: string): string {
   const d = new Date(
     +yyyymmdd.slice(0, 4),
