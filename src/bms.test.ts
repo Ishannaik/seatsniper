@@ -3,7 +3,9 @@ import * as tls from "node-tls-client";
 import {
   parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError, prettyDate,
   DEFAULT_TLS_PROFILE, resolveTlsProfile, resolveClientIdentifier,
+  parseFormatChips, matchesFormat,
 } from "./bms.ts";
+import { matchesTheatre } from "./filters.ts";
 
 // Trimmed from a real 2026-07-27 response for The Odyssey (ET00480917, Mumbai).
 // Two shows on the 28th, one on the 27th — the exact shape BMS returns when it
@@ -325,4 +327,68 @@ test("prettyDate fails silently on the empty subscription date", () => {
 test("prettyDate rolls an out-of-range month over instead of rejecting it", () => {
   // Month 13 of 2026 becomes January 2027; the Date constructor normalises.
   expect(prettyDate("20261301")).toBe("Fri, 1 Jan");
+});
+
+// ---------------------------------------------------------------- format chips
+
+// Trimmed from a real 2026-08-10 Spider-Man: Brand New Day response. ScreenX (and
+// other premium formats) are SEPARATE child event codes — their shows never appear
+// under the parent event's attributes.
+const CHIP_HTML = `
+{"type":"chip","title":"2D","cta":{"type":"formatSelector","analytics":{"event_code":"ET00502600","format":"2D","screen_name":"movie_showtimes","uuid":"aaa"},"additionalData":{"eventCode":"ET00502600","eventUrl":"spider-man-brand-new-day","language":"English","refEventCode":"ET00502600","uuid":"bbb"}}},
+{"type":"chip","title":"3D SCREEN X","cta":{"type":"formatSelector","analytics":{"event_code":"ET00502684","format":"3D SCREEN X","screen_name":"movie_showtimes","uuid":"ccc"},"additionalData":{"eventCode":"ET00502684","eventUrl":"spider-man-brand-new-day-3d-screen-x","language":"English","refEventCode":"ET00502684","uuid":"ddd"}}},
+{"type":"chip","title":"IMAX 3D","cta":{"type":"formatSelector","analytics":{"event_code":"ET00502699","format":"IMAX 3D","screen_name":"movie_showtimes","uuid":"eee"},"additionalData":{"eventCode":"ET00502699","eventUrl":"spider-man-brand-new-day-imax-3d","language":"English","refEventCode":"ET00502699","uuid":"fff"}}}
+`;
+
+test("parseFormatChips extracts child event codes from format-selector chips", () => {
+  const chips = parseFormatChips(CHIP_HTML);
+  expect(chips).toEqual([
+    { title: "2D", eventCode: "ET00502600", slug: "spider-man-brand-new-day" },
+    { title: "3D SCREEN X", eventCode: "ET00502684", slug: "spider-man-brand-new-day-3d-screen-x" },
+    { title: "IMAX 3D", eventCode: "ET00502699", slug: "spider-man-brand-new-day-imax-3d" },
+  ]);
+});
+
+test("parseFormatChips returns [] for a page with no format selector", () => {
+  expect(parseFormatChips("<html><body>no chips here</body></html>")).toEqual([]);
+});
+
+// ---------------------------------------------------------------- format matching
+
+test("matchesFormat is case-insensitive: IMAX matches IMAX", () => {
+  expect(matchesFormat("IMAX", "IMAX")).toBe(true);
+  expect(matchesFormat("imax", "IMAX")).toBe(true);
+});
+
+test("matchesFormat substring: IMAX catches IMAX 3D", () => {
+  expect(matchesFormat("IMAX 3D", "IMAX")).toBe(true);
+});
+
+test("matchesFormat space-insensitive: SCREENX catches 3D SCREEN X", () => {
+  expect(matchesFormat("3D SCREEN X", "SCREENX")).toBe(true);
+  expect(matchesFormat("3D SCREEN X", "SCREEN X")).toBe(true);
+  expect(matchesFormat("3D SCREEN X", "SCREENX,SCREEN X")).toBe(true);
+});
+
+test("matchesFormat false when no token matches", () => {
+  expect(matchesFormat("ATMOS", "SCREENX")).toBe(false);
+  expect(matchesFormat("", "SCREENX")).toBe(false);
+  expect(matchesFormat("IMAX", "4DX,SCREENX")).toBe(false);
+});
+
+test("matchesFormat multi-token filter needs only one hit", () => {
+  expect(matchesFormat("4DX", "SCREENX,4DX")).toBe(true);
+});
+
+test("ScreenX child event codes and theatre filter both apply", () => {
+  // Format chips name the child event ScreenX lives under; theatre: still
+  // selects venues independently, so a watch can ask for ScreenX at PVR.
+  const screenx = parseFormatChips(CHIP_HTML).find((c) => matchesFormat(c.title, "SCREENX"));
+  expect(screenx?.eventCode).toBe("ET00502684");
+  expect(screenx?.slug).toBe("spider-man-brand-new-day-3d-screen-x");
+
+  const venues = parseVenues(VENUE_HTML);
+  expect(venues.filter((v) => matchesTheatre(v.name, v.code, "PVR")).map((v) => v.code)).toEqual([]);
+  expect(venues.filter((v) => matchesTheatre(v.name, v.code, "MIRAJ,IMAX WADALA")).map((v) => v.code)).toEqual(["MCIW"]);
+  expect(venues.filter((v) => matchesTheatre(v.name, v.code, "INOX")).map((v) => v.code)).toEqual(["IMOB"]);
 });
