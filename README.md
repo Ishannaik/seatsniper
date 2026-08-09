@@ -57,6 +57,8 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 - [🧗 BookMyShow quirks](#bookmyshow-quirks)
 - [🤝 Contributing](#contributing)
 
+<a id="features"></a>
+
 ## 🎯 Features
 
 | | |
@@ -68,6 +70,8 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 | ⚡ **One request per movie** | 50 watches on the same movie cost the same as 1. Coalesced polling keeps BookMyShow happy. |
 | 📱 **User-install commands** | Works in DMs and servers, installs straight to your account. |
 | 💾 **SQLite, zero config** | No database server, no Docker required. One file. |
+
+<a id="quick-start"></a>
 
 ## 🚀 Quick start
 
@@ -91,6 +95,8 @@ Then:
 2. In Discord, run `/watch` and paste a BookMyShow link.
 3. Wait. The DM arrives when tickets go live.
 
+<a id="run-with-docker"></a>
+
 ## 🐳 Run with Docker
 
 ```bash
@@ -106,6 +112,8 @@ There is no HTTP healthcheck. `docker compose ps` showing "up" only means the
 process is running, not that the bot is logged in and polling. Configure
 `UPTIME_KUMA_PUSH_URL`; the bot pings it after each poll, so a missing push
 means polling stopped even if the container is still up.
+
+<a id="manual-setup"></a>
 
 ## 📦 Manual setup
 
@@ -152,6 +160,8 @@ Bun auto-loads `.env` from the working directory.
 
 Each user can hold up to 5 watches.
 
+<a id="how-it-works"></a>
+
 ## 🧠 How it works
 
 1. **Save.** `/watch` parses the link, then hits BookMyShow once to confirm the
@@ -187,6 +197,8 @@ Coalescing reduces request volume on whatever egress you run. It is not a
 substitute for suitable egress: BookMyShow checks the TLS fingerprint, and
 its geographic restrictions can still block datacenter IPs outside India.
 
+<a id="configuration"></a>
+
 ## ⚙️ Configuration
 
 | Variable | Required | Default | Purpose |
@@ -218,6 +230,8 @@ An unparseable or negative value is not fatal — the bot logs a `[config]` warn
 uses the default. A `STAGGER_MS_MAX` below `STAGGER_MS_MIN` is raised to the minimum,
 giving a fixed delay, rather than being silently swapped.
 
+<a id="project-layout"></a>
+
 ## 🗺️ Project layout
 
 ```
@@ -231,6 +245,8 @@ src/
 assets/          logo
 docs/            design specs and measured findings
 ```
+
+<a id="bookmyshow-quirks"></a>
 
 ## 🧗 BookMyShow quirks
 
@@ -251,6 +267,8 @@ docs/            design specs and measured findings
 | Slash commands missing | Global vs guild registration | Set `DISCORD_GUILD_ID` for instant guild commands |
 | DMs never arrive | User closed DMs | The bot falls back to a channel; open DMs with the bot |
 | Integration tests fail in CI | Live BookMyShow from US runners | Keep `integration.ts` manual and not part of CI |
+
+<a id="contributing"></a>
 
 ## 🤝 Contributing
 
