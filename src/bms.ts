@@ -266,6 +266,41 @@ export function parseVenues(html: string): { code: string; name: string }[] {
 }
 
 /**
+ * A format selector on the buytickets page ("3D SCREEN X", "4DX", …). Each format
+ * is a SEPARATE child event code — ScreenX shows never appear under the parent
+ * event's `attributes`; they live on e.g. ET00502684. Format filters must resolve
+ * these chips to know which child pages to check.
+ */
+export type FormatChip = {
+  title: string;
+  eventCode: string;
+  slug: string; // the child event's URL slug, e.g. "spider-man-brand-new-day-3d-screen-x"
+};
+
+/**
+ * Parse the format-selector chips off a buytickets page.
+ *
+ * Shape (measured 2026-08-10): {"type":"chip","title":"3D SCREEN X","cta":{"type":
+ * "formatSelector","analytics":{...,"event_code":"ET00502684",...},"additionalData":
+ * {...,"eventUrl":"spider-man-brand-new-day-3d-screen-x",...}}}
+ */
+export function parseFormatChips(html: string): FormatChip[] {
+  const out: FormatChip[] = [];
+  const re =
+    /\{"type":"chip","title":"([^"]+)","cta":\{"type":"formatSelector","analytics":\{[^}]*"event_code":"(ET\d{6,})"[^}]*\},"additionalData":\{[^}]*"eventUrl":"([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const title = m[1]!;
+    const eventCode = m[2]!;
+    const slug = m[3]!;
+    if (!out.some((c) => c.title === title && c.eventCode === eventCode)) {
+      out.push({ title, eventCode, slug });
+    }
+  }
+  return out;
+}
+
+/**
  * The availability test. A date is bookable iff BookMyShow actually rendered shows
  * FOR THAT DATE — not merely that the page loaded and had shows on it.
  */
@@ -288,10 +323,11 @@ export function showsOnDate(shows: Show[], date: string): Show[] {
 export const PROBE_DATE = "20991231";
 
 /** Every date this movie is currently bookable for, in this city. One request.
- *  `venues` is null when venue-cards failed to parse — not the same as []. */
+ *  `venues` is null when venue-cards failed to parse — not the same as [].
+ *  `chips` are the format-selector child events (ScreenX etc.), if parseable. */
 export async function fetchBookableDates(
   t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }> {
+): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null; chips: FormatChip[] }> {
   const { title, html } = await fetchPage({ ...t, date: PROBE_DATE });
   const dates = parseBookableDates(html);
   let venues: { code: string; name: string }[] | null = null;
@@ -300,7 +336,13 @@ export async function fetchBookableDates(
   } catch (e) {
     console.error(`[bms] venue parse failed for ${t.eventCode}/${t.city}:`, (e as Error).message);
   }
-  return { title, dates, venues };
+  let chips: FormatChip[] = [];
+  try {
+    chips = parseFormatChips(html);
+  } catch (e) {
+    console.error(`[bms] chip parse failed for ${t.eventCode}/${t.city}:`, (e as Error).message);
+  }
+  return { title, dates, venues, chips };
 }
 
 /**
@@ -311,23 +353,31 @@ export async function fetchBookableDates(
  * NOT by the watched date, so ten friends watching the same film collapse to one
  * HTTP request no matter which dates they each picked.
  *
- * The map is rebuilt every cycle, so it is a within-tick cache and can never serve a
- * stale answer across polls.
+ * Format-filtered watches also ask a second question per date (does THIS date have
+ * matching shows, possibly on child format events) — that answer is keyed by
+ * (city, event, date) and coalesced the same way, so N friends with the same filter
+ * still cost one request per date instead of one per watch.
+ *
+ * The maps are rebuilt every cycle, so they are within-tick caches and can never
+ * serve a stale answer across polls.
  */
-let cycle = new Map<string, Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }>>();
+type BookableDates = { title: string; dates: string[]; venues: { code: string; name: string }[] | null; chips: FormatChip[] };
+type Showtimes = { title: string; shows: Show[] };
+
+let cycle = new Map<string, Promise<BookableDates>>();
+let showtimesCycle = new Map<string, Promise<Showtimes>>();
 let cycleHits = 0;
 
 export function beginCycle(): void {
   cycle = new Map();
+  showtimesCycle = new Map();
   cycleHits = 0;
 }
 
 /** Requests saved by coalescing during the current cycle. */
 export const coalescedCount = () => cycleHits;
 
-export function bookableDatesCached(
-  t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null }> {
+export function bookableDatesCached(t: Omit<Target, "date">): Promise<BookableDates> {
   const key = `${t.city}|${t.eventCode}`;
   const hit = cycle.get(key);
   if (hit) {
@@ -336,6 +386,19 @@ export function bookableDatesCached(
   }
   const p = fetchBookableDates(t);
   cycle.set(key, p);
+  return p;
+}
+
+/** fetchShowtimes coalesced per (city, event, date) within a cycle. */
+export function fetchShowtimesCached(t: Target): Promise<Showtimes> {
+  const key = `${t.city}|${t.eventCode}|${t.date}`;
+  const hit = showtimesCycle.get(key);
+  if (hit) {
+    cycleHits++;
+    return hit;
+  }
+  const p = fetchShowtimes(t);
+  showtimesCycle.set(key, p);
   return p;
 }
 
@@ -356,4 +419,13 @@ export function prettyDate(yyyymmdd: string): string {
     +yyyymmdd.slice(6, 8),
   );
   return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+}
+
+/** Does a show's format match the filter? Case-insensitive, space-insensitive
+ *  substring: "IMAX" catches "IMAX 3D"; "SCREENX" catches "3D SCREEN X".
+ *  Used both for show attributes and for matching format-selector chip titles. */
+export function matchesFormat(attributes: string, filter: string): boolean {
+  const compact = (s: string) => s.toUpperCase().replace(/\s+/g, "");
+  const attr = compact(attributes ?? "");
+  return filter.split(",").some((f) => attr.includes(compact(f)));
 }

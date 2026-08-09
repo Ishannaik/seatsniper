@@ -64,9 +64,12 @@ const formatsOf = (shows: Show[]) =>
 
 /** The payoff: this date just became bookable. */
 export function ticketsLive(opts: {
-  title: string; city: string; date: string; shows: Show[]; url: string; filters?: string | null;
+  title: string; city: string; date: string; shows: Show[]; url: string; filters?: string | null; matchedFormats?: string[];
 }) {
   const fmts = formatsOf(opts.shows);
+  const filterLine = opts.filters
+    ? `\n_Matching your filter: ${opts.filters}${opts.matchedFormats?.length ? ` (found: ${opts.matchedFormats.join(" · ")})` : ""}_`
+    : "";
   const embed = sig(new EmbedBuilder(), "Alert")
     .setColor(LIVE)
     .setTitle(`${opts.title} — tickets are live`)
@@ -74,7 +77,7 @@ export function ticketsLive(opts: {
     .setDescription(
       `${opts.shows.length} show${opts.shows.length === 1 ? "" : "s"} in ` +
         `${titleCase(opts.city)} on ${prettyDate(opts.date)}.` +
-        (opts.filters ? `\n_Matching your filter: ${opts.filters}_` : ""),
+        filterLine,
     )
     .addFields({ name: "Showtimes", value: timeList(opts.shows) })
     .setTimestamp();
@@ -173,14 +176,15 @@ export function armedForDate(opts: { title: string; city: string; date: string; 
   };
 }
 
-export function armedForMovie(opts: { title: string; city: string; openNow: string[]; everyMin: number; filters?: string | null }) {
+export function armedForMovie(opts: { title: string; city: string; openNow: string[]; everyMin: number; filters?: string | null; warning?: string | null }) {
   const e = sig(new EmbedBuilder(), "Watch")
     .setColor(ARMED)
     .setTitle(opts.title)
     .setDescription(
       `Watching every date in ${titleCase(opts.city)}. You'll get a DM when a new date or cinema ` +
         `opens, until you stop it.` +
-        (opts.filters ? `\nOnly pinging for **${opts.filters}**.` : ""),
+        (opts.filters ? `\nOnly pinging for **${opts.filters}**.` : "") +
+        (opts.warning ? `\n${opts.warning}` : ""),
     )
     .setTimestamp();
   e.addFields(
