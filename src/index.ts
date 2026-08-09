@@ -374,8 +374,9 @@ async function poll() {
   beginCycle(); // fresh coalescing map; never serves an answer across polls
   for (const w of watches) {
     try {
-      if (await expireStale(w)) continue;
-      await checkWatch(w);
+      if (!(await expireStale(w))) {
+        await checkWatch(w);
+      }
     } catch (e) {
       // A watch can disappear while a poll is in flight. One stale snapshot must
       // not abort the rest of the cycle. Reachable since PRAGMA foreign_keys=ON:
