@@ -373,8 +373,19 @@ async function poll() {
   }
   beginCycle(); // fresh coalescing map; never serves an answer across polls
   for (const w of watches) {
-    if (await expireStale(w)) continue;
-    await checkWatch(w);
+    try {
+      if (await expireStale(w)) continue;
+      await checkWatch(w);
+    } catch (e) {
+      // A watch can disappear while a poll is in flight. One stale snapshot must
+      // not abort the rest of the cycle. Reachable since PRAGMA foreign_keys=ON:
+      // a /stop between the allWatches() snapshot and a ledger write now throws
+      // FOREIGN KEY constraint failed where it used to insert an orphan row.
+      // Log the raw value, not `(e as Error).message`. The cast is compile-time only, so a
+      // thrown null or undefined would make the handler itself throw and abort the cycle,
+      // which is the exact failure this guard exists to prevent.
+      console.error(`[watch ${w.id}] poll failed:`, e);
+    }
     // Stagger so we never burst. Cheap insurance against looking automated.
     // Tunable via STAGGER_MS_MIN / STAGGER_MS_MAX; defaults are the previous 2000-5000ms.
     await Bun.sleep(staggerDelayMs(STAGGER));
