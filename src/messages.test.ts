@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Show } from "./bms.ts";
-import { LIVE, alreadyOnSale, newCinemas, subscriptionAlert, ticketsLive } from "./messages.ts";
+import { LIVE, alreadyOnSale, newCinemas, subscriptionAlert, ticketsLive, watchList } from "./messages.ts";
 
 const URL = "https://in.bookmyshow.com/movies/mumbai/foo/buytickets/ET00000001";
 
@@ -156,4 +156,59 @@ test("subscriptionAlert delegates to newCinemas when only venues", () => {
     url: URL,
   });
   expect(embeds[0]!.data.title).toBe("The Odyssey — new cinema");
+});
+
+// --- /list state line (issue #39) ---
+
+function watchRow(over: Partial<Parameters<typeof watchList>[0][0]> = {}) {
+  return {
+    id: 1,
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    fail_count: 0,
+    last_ok_at: null as number | null,
+    ...over,
+  };
+}
+
+test("watchList shows the last successful check as a relative timestamp", () => {
+  const { embeds } = watchList([watchRow({ last_ok_at: 1786246591 })]);
+  expect(embeds[0]!.data.description).toContain("checked <t:1786246591:R>");
+});
+
+test("watchList says so plainly when a watch has never been checked", () => {
+  const { embeds } = watchList([watchRow({ last_ok_at: null })]);
+  expect(embeds[0]!.data.description).toContain("not checked yet");
+});
+
+test("watchList keeps the last-ok time on a watch that can't read BookMyShow", () => {
+  // The state that needed it: "can't read BookMyShow" alone does not tell you whether the
+  // watch broke minutes ago or never worked at all.
+  const { embeds } = watchList([watchRow({ fail_count: 3, last_ok_at: 1786246591 })]);
+  const description = embeds[0]!.data.description!;
+  expect(description).toContain("can't read BookMyShow");
+  expect(description).toContain("<t:1786246591:R>");
+});
+
+test("watchList distinguishes a broken watch that never worked", () => {
+  const { embeds } = watchList([watchRow({ fail_count: 5, last_ok_at: null })]);
+  const description = embeds[0]!.data.description!;
+  expect(description).toContain("can't read BookMyShow");
+  expect(description).toContain("never checked");
+  expect(description).not.toContain("<t:");
+});
+
+test("watchList keeps a null last_ok_at from rendering a broken timestamp", () => {
+  for (const fail_count of [0, 3]) {
+    const { embeds } = watchList([watchRow({ fail_count, last_ok_at: null })]);
+    expect(embeds[0]!.data.description).not.toContain("<t:null");
+    expect(embeds[0]!.data.description).not.toContain("NaN");
+  }
+});
+
+test("watchList still keeps each watch to two lines without filters", () => {
+  // Mobile-friendly: the state line grew, so check it did not grow a line.
+  const { embeds } = watchList([watchRow({ fail_count: 3, last_ok_at: 1786246591 })]);
+  expect(embeds[0]!.data.description!.split("\n")).toHaveLength(2);
 });
