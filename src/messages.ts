@@ -339,7 +339,7 @@ export function help() {
           {
             name: "Filter by format / day",
             value:
-              "```/watch link:<paste> format:IMAX,4DX days:fri,sat,sun```" +
+              "```/watch link:<paste> format:IMAX,4DX days:fri,sat,sun after:18:00```" +
               "Optional. Only pings when a matching show appears. " +
               "Formats: IMAX, 4DX, ScreenX, 3D, 2D, MX4D, Dolby Atmos…\n" +
               "_Both filter date and showtime alerts only. " +

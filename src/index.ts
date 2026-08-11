@@ -10,6 +10,7 @@ import {
   seenDates, recordSeenDates, seenVenues, recordSeenVenues, shouldSilentSeedVenues,
   isSubscription, SUBSCRIPTION, MAX_WATCHES_PER_USER, type Watch,
 } from "./db.ts";
+import { parseTimeFilter, matchesTimeFilter } from "./time-filter.ts";
 import {
   FORMAT_CHOICES, DAY_CHOICES, normaliseFormats, normaliseDays, matchesFormat,
   matchesDay, filterSummary,
@@ -48,13 +49,36 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   let target;
   const formatFilter = normaliseFormats(i.options.getString("format"));
   const dayFilter = normaliseDays(i.options.getString("days"));
+
+  // Reject an unparseable time instead of silently dropping the filter: a watch that
+  // quietly ignores "after 18:00" fires at 10am and looks broken.
+  const afterRaw = i.options.getString("after")?.trim() || null;
+  const beforeRaw = i.options.getString("before")?.trim() || null;
+  const afterMinutes = afterRaw === null ? null : parseTimeFilter(afterRaw);
+  const beforeMinutes = beforeRaw === null ? null : parseTimeFilter(beforeRaw);
+  if (afterRaw !== null && afterMinutes === null) {
+    return void i.editReply(`❌ I couldn't read \`after: ${afterRaw}\` as a time. Use 24-hour \`18:00\` or \`6:00 PM\`.`);
+  }
+  if (beforeRaw !== null && beforeMinutes === null) {
+    return void i.editReply(`❌ I couldn't read \`before: ${beforeRaw}\` as a time. Use 24-hour \`12:00\` or \`11:30 AM\`.`);
+  }
+  // An empty window can never match, so say so now rather than watching forever in silence.
+  if (afterMinutes !== null && beforeMinutes !== null && afterMinutes >= beforeMinutes) {
+    return void i.editReply(
+      `❌ \`after: ${afterRaw}\` is not before \`before: ${beforeRaw}\`, so no show could ever match. ` +
+        "The window does not wrap past midnight.",
+    );
+  }
+  const afterFilter = afterRaw;
+  const beforeFilter = beforeRaw;
+
   try {
     const parsed = parseWatchUrl(i.options.getString("link", true));
     const dateOpt = i.options.getString("date")?.trim();
     // "any" (or a link with no date and no date option) subscribes to the movie:
     // ping me every time a NEW date unlocks, rather than watching one date.
     const wantsAny = dateOpt ? /^(any|all|every|new)$/i.test(dateOpt) : !parsed.date;
-    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter));
+    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter, afterFilter, beforeFilter));
 
     const date = dateOpt ? normaliseDate(dateOpt) : parsed.date!;
     if (date < todayIST()) {
@@ -101,11 +125,12 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
     user_id: i.user.id, channel_id: i.channelId, city: target.city, slug: target.slug,
     event_code: target.eventCode, date: target.date, title,
     format_filter: formatFilter, day_filter: dayFilter,
+    after_filter: afterFilter, before_filter: beforeFilter,
   });
   if (id === null) return void i.editReply("You're already watching that movie and date. `/list` to see it.");
 
   await i.editReply(
-    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter }) }),
+    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter }) }),
   );
 }
 
@@ -119,6 +144,8 @@ async function subscribeToMovie(
   parsed: { city: string; slug: string; eventCode: string },
   formatFilter: string | null,
   dayFilter: string | null,
+  afterFilter: string | null,
+  beforeFilter: string | null,
 ) {
   if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
     return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
@@ -143,6 +170,7 @@ async function subscribeToMovie(
     user_id: i.user.id, channel_id: i.channelId, city: parsed.city, slug: parsed.slug,
     event_code: parsed.eventCode, date: SUBSCRIPTION, title,
     format_filter: formatFilter, day_filter: dayFilter,
+    after_filter: afterFilter, before_filter: beforeFilter,
   });
   if (id === null) return void i.editReply("You're already subscribed to that movie. `/list` to see it.");
 
@@ -150,7 +178,7 @@ async function subscribeToMovie(
   if (venues) recordSeenVenues(id, venues.map((v) => v.code));
 
   await i.editReply(
-    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter }) }),
+    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter }) }),
   );
 }
 
@@ -215,18 +243,30 @@ async function checkSubscription(w: Watch) {
   // Apply day filter to fresh dates before announcing.
   if (w.day_filter) freshDates = freshDates.filter((d) => matchesDay(d, w.day_filter!));
 
-  // Format filter: only announce dates that actually have matching shows.
-  // Costs an extra fetchShowtimes per fresh date — only spent when a format filter is set.
+  // Format and time-of-day filters: only announce dates that actually have a matching
+  // show. Costs an extra fetchShowtimes per fresh date — spent only when one of those
+  // filters is set. The time window needs the same fetch as format (a date alone says
+  // nothing about start times), so the two share one pass rather than fetching twice.
   let matchedFormats: string[] = [];
-  if (w.format_filter && freshDates.length) {
+  const afterMinutes = w.after_filter ? parseTimeFilter(w.after_filter) : null;
+  const beforeMinutes = w.before_filter ? parseTimeFilter(w.before_filter) : null;
+  const needsShowtimes = Boolean(w.format_filter) || afterMinutes !== null || beforeMinutes !== null;
+  if (needsShowtimes && freshDates.length) {
     const kept: string[] = [];
     for (const d of freshDates) {
       try {
         const shows = showsOnDate((await fetchShowtimes({ city: w.city, slug: w.slug, eventCode: w.event_code, date: d })).shows, d);
-        const hits = shows.filter((s) => matchesFormat(s.attributes, w.format_filter!));
+        const hits = shows.filter(
+          (sh) =>
+            (!w.format_filter || matchesFormat(sh.attributes, w.format_filter)) &&
+            matchesTimeFilter(sh.epoch, afterMinutes, beforeMinutes),
+        );
         if (hits.length) {
           kept.push(d);
-          for (const h of hits) if (h.attributes && !matchedFormats.includes(h.attributes)) matchedFormats.push(h.attributes);
+          // Only meaningful when a format filter is set; a time-only watch leaves this empty.
+          if (w.format_filter) {
+            for (const h of hits) if (h.attributes && !matchedFormats.includes(h.attributes)) matchedFormats.push(h.attributes);
+          }
         }
       } catch { /* skip uncheckable dates — they'll retry next poll */ }
     }
@@ -284,6 +324,10 @@ async function checkWatch(w: Watch) {
   let filtered = open;
   if (w.format_filter) filtered = filtered.filter((s) => matchesFormat(s.attributes, w.format_filter!));
   if (w.day_filter) filtered = filtered.filter((s) => matchesDay(s.showDateCode, w.day_filter!));
+  if (w.after_filter || w.before_filter) {
+    filtered = filtered.filter((s) =>
+      matchesTimeFilter(s.epoch, parseTimeFilter(w.after_filter ?? ""), parseTimeFilter(w.before_filter ?? "")));
+  }
   if (!filtered.length) return; // shows exist but none match — stay silent, keep watching
 
   // Same rule: a watch is only "done its job" once the user was actually told.

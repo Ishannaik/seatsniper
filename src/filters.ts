@@ -33,9 +33,19 @@ export function matchesDay(dateCode: string, filter: string): boolean {
 }
 
 /** Human-readable filter summary for embeds, e.g. "IMAX · 4DX · Fri, Sat, Sun". */
-export function filterSummary(w: { format_filter: string | null; day_filter: string | null }): string | null {
+export function filterSummary(w: {
+  format_filter: string | null;
+  day_filter: string | null;
+  after_filter?: string | null;
+  before_filter?: string | null;
+}): string | null {
   const parts: string[] = [];
   if (w.format_filter) parts.push(w.format_filter.split(",").join(" · "));
   if (w.day_filter) parts.push(w.day_filter.split(",").map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(", "));
+  // One phrase for the window rather than two, so "after 18:00 · before 23:00" reads as
+  // the single constraint it is.
+  if (w.after_filter && w.before_filter) parts.push(`${w.after_filter}–${w.before_filter}`);
+  else if (w.after_filter) parts.push(`after ${w.after_filter}`);
+  else if (w.before_filter) parts.push(`before ${w.before_filter}`);
   return parts.length ? parts.join(" · ") : null;
 }
