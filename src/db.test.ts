@@ -5,6 +5,8 @@ import { Database } from "bun:sqlite";
 const dbPath = `test-${Date.now()}.db`;
 
 let addWatch: typeof import("./db.ts").addWatch;
+let listWatches: typeof import("./db.ts").listWatches;
+let countWatches: typeof import("./db.ts").countWatches;
 let seenVenues: typeof import("./db.ts").seenVenues;
 let recordSeenVenues: typeof import("./db.ts").recordSeenVenues;
 let recordSeenDates: typeof import("./db.ts").recordSeenDates;
@@ -16,6 +18,8 @@ beforeAll(async () => {
   process.env.DB_PATH = dbPath;
   const mod = await import("./db.ts");
   addWatch = mod.addWatch;
+  listWatches = mod.listWatches;
+  countWatches = mod.countWatches;
   seenVenues = mod.seenVenues;
   recordSeenVenues = mod.recordSeenVenues;
   recordSeenDates = mod.recordSeenDates;
@@ -51,6 +55,20 @@ function addSubscriptionWatch(): number {
     event_code: "ET00480917",
     date: "",
     title: "Test Movie",
+  });
+  if (id === null) throw new Error("addWatch failed");
+  return id;
+}
+
+function addWatchFor(userId: string, eventCode: string): number {
+  const id = addWatch({
+    user_id: userId,
+    channel_id: `channel-${userId}`,
+    city: "mumbai",
+    slug: `movie-${eventCode}`,
+    event_code: eventCode,
+    date: "20260730",
+    title: `Movie ${eventCode}`,
   });
   if (id === null) throw new Error("addWatch failed");
   return id;
@@ -106,4 +124,35 @@ test("a rejected removeWatch leaves the ledgers intact", () => {
 
   expect(seenDates(id)).toEqual(["20260730"]);
   expect(seenVenues(id)).toEqual(["MCIW"]);
+});
+
+test("countWatches counts each user independently", () => {
+  addWatchFor("user-a", "EVENT-A1");
+  addWatchFor("user-a", "EVENT-A2");
+  addWatchFor("user-b", "EVENT-B1");
+
+  expect(countWatches("user-a")).toBe(2);
+  expect(countWatches("user-b")).toBe(1);
+  expect(countWatches("missing-user")).toBe(0);
+});
+
+test("listWatches never returns another user's watches", () => {
+  const aId = addWatchFor("user-a", "EVENT-A1");
+  addWatchFor("user-b", "EVENT-B1");
+
+  const watches = listWatches("user-a");
+  expect(watches).toHaveLength(1);
+  expect(watches[0].id).toBe(aId);
+  expect(watches[0].user_id).toBe("user-a");
+});
+
+test("removeWatch rejects cross-user deletes and allows the owner", () => {
+  const aId = addWatchFor("user-a", "EVENT-A1");
+  const bId = addWatchFor("user-b", "EVENT-B1");
+
+  expect(removeWatch(bId, "user-a")).toBe(false);
+  expect(listWatches("user-b").map((watch) => watch.id)).toEqual([bId]);
+
+  expect(removeWatch(aId, "user-a")).toBe(true);
+  expect(listWatches("user-a")).toEqual([]);
 });

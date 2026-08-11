@@ -57,6 +57,8 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 - [🧗 BookMyShow quirks](#bookmyshow-quirks)
 - [🤝 Contributing](#contributing)
 
+<a id="features"></a>
+
 ## 🎯 Features
 
 | | |
@@ -69,6 +71,8 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 | 📱 **User-install commands** | Works in DMs and servers, installs straight to your account. |
 | 💾 **SQLite, zero config** | No database server, no Docker required. One file. |
 
+<a id="quick-start"></a>
+
 ## 🚀 Quick start
 
 One command on Linux or macOS. It installs Bun, clones the repo, prompts for
@@ -78,6 +82,11 @@ pm2:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ishannaik/seatsniper/main/install.sh | bash
 ```
+
+> `install.sh` supports Linux and macOS. On Windows, use the Manual setup or
+> Docker instructions below. A datacenter VPS in India can work with Safari TLS
+> to BookMyShow, while a residential home IP is optional, not required. See the
+> [measured findings](docs/superpowers/specs/2026-07-27-bms-access-findings.md).
 
 Non-interactive, for CI or a box with no terminal:
 
@@ -90,6 +99,8 @@ Then:
 1. Invite the bot with the URL the installer prints.
 2. In Discord, run `/watch` and paste a BookMyShow link.
 3. Wait. The DM arrives when tickets go live.
+
+<a id="run-with-docker"></a>
 
 ## 🐳 Run with Docker
 
@@ -106,6 +117,8 @@ There is no HTTP healthcheck. `docker compose ps` showing "up" only means the
 process is running, not that the bot is logged in and polling. Configure
 `UPTIME_KUMA_PUSH_URL`; the bot pings it after each poll, so a missing push
 means polling stopped even if the container is still up.
+
+<a id="manual-setup"></a>
 
 ## 📦 Manual setup
 
@@ -152,6 +165,8 @@ Bun auto-loads `.env` from the working directory.
 
 Each user can hold up to 5 watches.
 
+<a id="how-it-works"></a>
+
 ## 🧠 How it works
 
 1. **Save.** `/watch` parses the link, then hits BookMyShow once to confirm the
@@ -187,6 +202,8 @@ Coalescing reduces request volume on whatever egress you run. It is not a
 substitute for suitable egress: BookMyShow checks the TLS fingerprint, and
 its geographic restrictions can still block datacenter IPs outside India.
 
+<a id="configuration"></a>
+
 ## ⚙️ Configuration
 
 | Variable | Required | Default | Purpose |
@@ -218,6 +235,8 @@ An unparseable or negative value is not fatal — the bot logs a `[config]` warn
 uses the default. A `STAGGER_MS_MAX` below `STAGGER_MS_MIN` is raised to the minimum,
 giving a fixed delay, rather than being silently swapped.
 
+<a id="project-layout"></a>
+
 ## 🗺️ Project layout
 
 ```
@@ -231,6 +250,8 @@ src/
 assets/          logo
 docs/            design specs and measured findings
 ```
+
+<a id="bookmyshow-quirks"></a>
 
 ## 🧗 BookMyShow quirks
 
@@ -262,6 +283,8 @@ docs/            design specs and measured findings
 When it will break: Cloudflare may harden the Safari handshake, an abused IP
 can lose reputation even with a valid profile, and a BookMyShow HTML reshape
 can surface as a `BmsError` or as silence until the parser is updated.
+
+<a id="contributing"></a>
 
 ## 🤝 Contributing
 
