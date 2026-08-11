@@ -1,17 +1,17 @@
 import { expect, test } from "bun:test";
 import type { Show } from "./bms.ts";
-import { LIVE, alreadyOnSale, newCinemas, subscriptionAlert } from "./messages.ts";
+import { LIVE, alreadyOnSale, newCinemas, subscriptionAlert, ticketsLive } from "./messages.ts";
 
 const URL = "https://in.bookmyshow.com/movies/mumbai/foo/buytickets/ET00000001";
 
-function show(venueCode: string, venueName: string): Show {
+function show(venueCode: string, venueName: string, epoch = 0, attributes = ""): Show {
   return {
     sessionId: "s",
     availStatus: "",
     showDateCode: "20260728",
     showTime: "06:40 AM",
-    attributes: "",
-    epoch: 0,
+    attributes,
+    epoch,
     venueCode,
     venueName,
   };
@@ -43,6 +43,75 @@ test("alreadyOnSale keeps named venues when venue codes are empty", () => {
   const theatres = embed.fields?.find((field) => field.name === "Theatres");
   expect(theatres?.value).toContain("PVR: Juhu");
   expect(theatres?.value).toContain("Miraj Cinemas: IMAX, Wadala");
+});
+
+test("ticketsLive groups showtimes under theatre headings", () => {
+  const { embeds } = ticketsLive({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [
+      show("PVRJ", "PVR: Juhu", 1000, "IMAX"),
+      show("MCIW", "Miraj Cinemas: IMAX, Wadala", 1000),
+    ],
+    url: URL,
+  });
+  const value = embeds[0]!.data.fields?.find((field) => field.name === "Showtimes")?.value ?? "";
+  expect(value).toContain("**PVR: Juhu**");
+  expect(value).toContain("**Miraj Cinemas: IMAX, Wadala**");
+  expect(value).toContain("IMAX");
+});
+
+test("ticketsLive keeps the same wall-clock time for different theatres", () => {
+  const { embeds } = ticketsLive({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [
+      show("PVRJ", "PVR: Juhu", 1000),
+      show("MCIW", "Miraj Cinemas: IMAX, Wadala", 1000),
+    ],
+    url: URL,
+  });
+  const value = embeds[0]!.data.fields?.find((field) => field.name === "Showtimes")?.value ?? "";
+  expect((value.match(/<t:1000:t>/g) ?? []).length).toBe(2);
+});
+
+test("ticketsLive falls back to venue code when venueName is empty", () => {
+  const { embeds } = ticketsLive({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [show("PVRJ", "", 1000)],
+    url: URL,
+  });
+  const value = embeds[0]!.data.fields?.find((field) => field.name === "Showtimes")?.value ?? "";
+  expect(value).toContain("**PVRJ**");
+});
+
+test("ticketsLive keeps grouped showtimes within Discord field limit", () => {
+  const longName =
+    "PVR: A very long cinema name with IMAX and Dolby Atmos in Mumbai plus additional venue details and hall numbers";
+  const shows = Array.from({ length: 6 }, (_, venueIndex) =>
+    Array.from({ length: 4 }, (_, timeIndex) =>
+      show(
+        `V${venueIndex}`,
+        `${longName} ${venueIndex}`,
+        1000 + venueIndex * 3600 + timeIndex * 60,
+        "IMAX",
+      ),
+    ),
+  ).flat();
+  const { embeds } = ticketsLive({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows,
+    url: URL,
+  });
+  const value = embeds[0]!.data.fields?.find((field) => field.name === "Showtimes")?.value ?? "";
+  expect(value.length).toBeLessThanOrEqual(1024);
+  expect(value).toMatch(/more theatres/);
 });
 
 test("newCinemas lists venue names and uses LIVE alert colour", () => {

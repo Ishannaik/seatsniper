@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import * as tls from "node-tls-client";
 import {
-  parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError,
+  parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError, prettyDate,
   DEFAULT_TLS_PROFILE, resolveTlsProfile, resolveClientIdentifier,
 } from "./bms.ts";
 
@@ -258,4 +258,71 @@ test("every Chrome-family profile the library ships is rejected", () => {
 
 test("an unsupported profile is rejected on padding too, not just exact spelling", () => {
   expect(() => resolveClientIdentifier("  chrome_120  ")).toThrow(BmsError);
+});
+
+// --- prettyDate -------------------------------------------------------------
+//
+// The BMS date code is what every DM the bot sends is stamped with, so a
+// regression here is visible to users on every alert. These pin the exact
+// strings, not just "it returned something".
+
+test("prettyDate renders a BMS date code as a human date", () => {
+  expect(prettyDate("20260730")).toBe("Thu, 30 Jul");
+  expect(prettyDate("20260728")).toBe("Tue, 28 Jul");
+  expect(prettyDate("20261231")).toBe("Thu, 31 Dec");
+});
+
+test("prettyDate does not zero-pad a single-digit day", () => {
+  // "5 Jan", not "05 Jan" — the day is formatted as numeric.
+  expect(prettyDate("20260105")).toBe("Mon, 5 Jan");
+  expect(prettyDate("20260803")).toBe("Mon, 3 Aug");
+});
+
+test("prettyDate handles a leap day", () => {
+  expect(prettyDate("20240229")).toBe("Thu, 29 Feb");
+});
+
+test("prettyDate is stable across timezones", () => {
+  // prettyDate builds the date in local time and formats it in local time, so
+  // the day component cannot drift. The naive alternative — parsing
+  // "2026-07-30" as a date-only string — is read as UTC midnight and lands on
+  // the 29th anywhere behind UTC.
+  const naive = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+
+  const before = process.env.TZ;
+  try {
+    for (const tz of ["UTC", "Asia/Kolkata", "Pacific/Kiritimati", "Pacific/Niue"]) {
+      process.env.TZ = tz;
+      expect(prettyDate("20260730")).toBe("Thu, 30 Jul");
+    }
+    // Control, so this test cannot quietly pass because the TZ switch is inert:
+    // the naive form really does drift in the westmost zone above (UTC-11).
+    process.env.TZ = "Pacific/Niue";
+    expect(naive("2026-07-30")).toBe("Wed, 29 Jul");
+  } finally {
+    if (before === undefined) delete process.env.TZ;
+    else process.env.TZ = before;
+  }
+});
+
+// Characterization: these record what prettyDate does with input it does not
+// promise to handle, so the behaviour is visible rather than surprising. Both
+// are currently unreachable — index.ts routes an empty date to the
+// subscription flow and messages.ts guards `w.date === ""` — so this documents
+// a landmine for future callers, it does not report a live bug.
+
+test("prettyDate on a non-numeric string is an explicit Invalid Date", () => {
+  expect(prettyDate("notadate")).toBe("Invalid Date");
+});
+
+test("prettyDate fails silently on the empty subscription date", () => {
+  // Number("") is 0, so this becomes new Date(0, -1, 0) — a real 1899 date
+  // that formats without complaint. Never pass a subscription's date here.
+  expect(prettyDate("")).toBe("Thu, 30 Nov");
+});
+
+test("prettyDate rolls an out-of-range month over instead of rejecting it", () => {
+  // Month 13 of 2026 becomes January 2027; the Date constructor normalises.
+  expect(prettyDate("20261301")).toBe("Fri, 1 Jan");
 });

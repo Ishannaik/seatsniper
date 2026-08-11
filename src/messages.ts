@@ -59,6 +59,43 @@ function timeList(shows: Show[], limit = 8): string {
   return out.join(" · ") + (extra > 0 ? ` _+${extra} more_` : "");
 }
 
+/** Showtimes grouped by theatre, so a live DM reads by venue instead of one flat list. */
+function groupedTimeList(shows: Show[], venueLimit = 6, timesPerVenue = 4): string {
+  const maxFieldValue = 1024;
+  const byVenue = new Map<string, { name: string; times: string[] }>();
+  for (const s of shows) {
+    const key = s.venueCode || s.venueName || "Other";
+    const name = s.venueName || s.venueCode || "Other";
+    if (!byVenue.has(key)) byVenue.set(key, { name, times: [] });
+    const venue = byVenue.get(key)!;
+    const time = `<t:${s.epoch}:t>${s.attributes ? ` ${s.attributes}` : ""}`;
+    if (!venue.times.includes(time)) venue.times.push(time);
+  }
+
+  const venues = [...byVenue.values()];
+  const lines: string[] = [];
+  for (const venue of venues.slice(0, venueLimit)) {
+    const extraTimes = venue.times.length - timesPerVenue;
+    const times = venue.times.slice(0, timesPerVenue).join(" · ");
+    const line = `**${venue.name}**\n${times}${extraTimes > 0 ? ` _+${extraTimes} more_` : ""}`;
+    const candidate = lines.length ? `${lines.join("\n\n")}\n\n${line}` : line;
+    if (candidate.length > maxFieldValue) break;
+    lines.push(line);
+  }
+  const extraVenues = venues.length - lines.length;
+  let value = lines.join("\n\n") + (extraVenues > 0 ? `\n_+${extraVenues} more theatres_` : "");
+  if (value.length > maxFieldValue && extraVenues > 0) {
+    const suffix = `\n_+${extraVenues} more theatres_`;
+    let truncated = lines.join("\n\n");
+    while (truncated.length + suffix.length > maxFieldValue) {
+      lines.pop();
+      truncated = lines.join("\n\n");
+    }
+    value = truncated + suffix;
+  }
+  return value || timeList(shows);
+}
+
 const formatsOf = (shows: Show[]) =>
   [...new Set(shows.map((s) => s.attributes).filter(Boolean))];
 
@@ -90,7 +127,7 @@ export function ticketsLive(opts: {
         `${titleCase(opts.city)} on ${prettyDate(opts.date)}.` +
         (opts.filters ? `\n_Matching your filter: ${opts.filters}_` : ""),
     )
-    .addFields({ name: "Showtimes", value: timeList(opts.shows) })
+    .addFields({ name: "Showtimes", value: groupedTimeList(opts.shows) })
     .setTimestamp();
   if (fmts.length) {
     embed.addFields({
