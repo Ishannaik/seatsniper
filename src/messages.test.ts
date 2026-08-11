@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Show } from "./bms.ts";
-import { LIVE, newCinemas, subscriptionAlert, ticketsLive } from "./messages.ts";
+import { LIVE, alreadyOnSale, newCinemas, subscriptionAlert, ticketsLive } from "./messages.ts";
 
 const URL = "https://in.bookmyshow.com/movies/mumbai/foo/buytickets/ET00000001";
 
@@ -16,6 +16,34 @@ function show(venueCode: string, venueName: string, epoch = 0, attributes = ""):
     venueName,
   };
 }
+
+test("alreadyOnSale includes theatre names when venues are present", () => {
+  const { embeds } = alreadyOnSale({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [show("PVRJ", "PVR: Juhu"), show("MCIW", "Miraj Cinemas: IMAX, Wadala")],
+    url: URL,
+  });
+  const embed = embeds[0]!.data;
+  const theatres = embed.fields?.find((field) => field.name === "Theatres");
+  expect(theatres?.value).toContain("PVR: Juhu");
+  expect(theatres?.value).toContain("Miraj Cinemas: IMAX, Wadala");
+});
+
+test("alreadyOnSale keeps named venues when venue codes are empty", () => {
+  const { embeds } = alreadyOnSale({
+    title: "The Odyssey",
+    city: "mumbai",
+    date: "20260728",
+    shows: [show("", "PVR: Juhu"), show("", "Miraj Cinemas: IMAX, Wadala")],
+    url: URL,
+  });
+  const embed = embeds[0]!.data;
+  const theatres = embed.fields?.find((field) => field.name === "Theatres");
+  expect(theatres?.value).toContain("PVR: Juhu");
+  expect(theatres?.value).toContain("Miraj Cinemas: IMAX, Wadala");
+});
 
 test("ticketsLive groups showtimes under theatre headings", () => {
   const { embeds } = ticketsLive({

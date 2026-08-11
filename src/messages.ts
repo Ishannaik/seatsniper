@@ -99,6 +99,20 @@ function groupedTimeList(shows: Show[], venueLimit = 6, timesPerVenue = 4): stri
 const formatsOf = (shows: Show[]) =>
   [...new Set(shows.map((s) => s.attributes).filter(Boolean))];
 
+/** Distinct venues in show order, up to `limit` names. */
+function theatreList(shows: Show[], limit = 6): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of shows) {
+    const key = s.venueCode || s.venueName;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    if (out.length < limit) out.push(s.venueName || key);
+  }
+  const extra = seen.size - out.length;
+  return out.join(" · ") + (extra > 0 ? ` _+${extra} more_` : "");
+}
+
 /** The payoff: this date just became bookable. */
 export function ticketsLive(opts: {
   title: string; city: string; date: string; shows: Show[]; url: string; filters?: string | null;
@@ -245,6 +259,10 @@ export function alreadyOnSale(opts: {
         `${titleCase(opts.city)} on ${prettyDate(opts.date)}, so there's nothing to wait for.`,
     )
     .addFields({ name: "Showtimes", value: timeList(opts.shows) });
+  const theatres = theatreList(opts.shows);
+  if (theatres) {
+    e.addFields({ name: "Theatres", value: theatres });
+  }
   if (fmts.length) {
     e.addFields({ name: fmts.length === 1 ? "Format" : "Formats", value: fmts.slice(0, 6).join(" · "), inline: true });
   }
