@@ -35,9 +35,10 @@
 You tell it a BookMyShow link and a date. It polls the site, and the moment that
 date is bookable you get one DM. Say `date:any` instead and it pings you every
 time a *new* date unlocks or a *new* cinema starts showing the movie. Trim the
-noise with filters: `format:IMAX,4DX` only pings for those screens, and
-`days:fri,sat` only on those weekdays. (`format:` filters date and showtime
-alerts; "new cinema appeared" alerts are not format-filtered — see
+noise with filters: `format:IMAX,4DX` only pings for those screens,
+`theatre:PVR,INOX` only for those cinemas, and `days:fri,sat` only on those
+weekdays. (`format:` filters date and showtime alerts; "new cinema appeared"
+alerts are not format-filtered, but they *are* theatre-filtered — see
 [Commands](#commands).)
 
 Works for movies, concerts, plays, any event BookMyShow lists in India.
@@ -65,7 +66,7 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 | --- | --- |
 | 📅 **Watch one date** | One DM the moment that date opens. The watch then deletes itself. No spam. |
 | 🎬 **Subscribe to a movie** | `date:any` = a DM every time a new date unlocks or a new cinema appears. |
-| 🎥 **Format + day filters** | Only ping for the screens you care about: `format:IMAX,4DX` matches by name (ScreenX spelling is flexible, e.g. `SCREENX` or `SCREEN X`), `days:fri,sat` by weekday. Both filter date and showtime alerts; new-cinema alerts are not format-filtered. |
+| 🎥 **Format, theatre + day filters** | Only ping for what you care about: `format:IMAX,4DX` matches by name (ScreenX spelling is flexible, e.g. `SCREENX` or `SCREEN X`), `theatre:PVR,INOX` by cinema name or venue code, `days:fri,sat` by weekday. All three filter date and showtime alerts; new-cinema alerts are theatre-filtered but not format-filtered. |
 | ✅ **Validates at creation** | The link is checked against the live site when you save it, so a broken watch fails immediately, not silently. |
 | ⚡ **One request per movie** | 50 watches on the same movie cost the same as 1. Coalesced polling keeps BookMyShow happy. |
 | 📱 **User-install commands** | Works in DMs and servers, installs straight to your account. |
@@ -148,7 +149,7 @@ Bun auto-loads `.env` from the working directory.
 | --- | --- |
 | `/watch link:<url> date:YYYY-MM-DD` | DM once when that date opens, then delete the watch |
 | `/watch link:<url> date:any` | Subscribe. DM when a new date or cinema appears |
-| `/watch link:<url> format:IMAX,4DX days:fri,sat` | Optional filters on any watch. Ping only for these formats or weekdays |
+| `/watch link:<url> format:IMAX,4DX theatre:PVR,INOX days:fri,sat` | Optional filters on any watch. Ping only for these formats, cinemas or weekdays |
 | `/list` | Show your active watches |
 | `/stop id:<n>` | Stop watch `n` from `/list` |
 | `/help` | How the bot works |
@@ -162,6 +163,14 @@ Bun auto-loads `.env` from the working directory.
 > filter line on that DM reflects the filters you set, not a format that was checked
 > for the cinema. `days:` behaves the same way — it applies to dates, and a cinema is
 > not a date.
+>
+> **`theatre:` is the exception** — it *is* enforced on the new-cinema half. A fresh
+> venue already carries its name and code from the same response the diff is computed
+> from, so filtering it costs no extra request and needs none of the coalescing the
+> format check does. `theatre:PVR` therefore stays silent when an INOX starts listing
+> the film. It matches case-insensitively as a substring of the cinema name *or* its
+> venue code, so `theatre:PVR` catches "PVR: Phoenix Palladium" and `theatre:IMOB`
+> works if you'd rather paste a code.
 
 Each user can hold up to 5 watches.
 

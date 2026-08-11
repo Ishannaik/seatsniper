@@ -16,6 +16,7 @@ export type Watch = {
   created_at: number;
   format_filter: string | null;
   day_filter: string | null;
+  theatre_filter: string | null;
 };
 
 const db = new Database(process.env.DB_PATH ?? "seatsniper.db", { create: true });
@@ -59,19 +60,20 @@ db.exec(`
 // Migration: add filter columns if the table predates them.
 try { db.exec("ALTER TABLE watches ADD COLUMN format_filter TEXT"); } catch { /* already exists */ }
 try { db.exec("ALTER TABLE watches ADD COLUMN day_filter TEXT"); } catch { /* already exists */ }
+try { db.exec("ALTER TABLE watches ADD COLUMN theatre_filter TEXT"); } catch { /* already exists */ }
 
 const now = () => Math.floor(Date.now() / 1000);
 
 export const MAX_WATCHES_PER_USER = 5;
 
-export function addWatch(w: Omit<Watch, "id" | "fail_count" | "last_ok_at" | "last_error" | "created_at" | "format_filter" | "day_filter"> & { format_filter?: string | null; day_filter?: string | null }): number | null {
+export function addWatch(w: Omit<Watch, "id" | "fail_count" | "last_ok_at" | "last_error" | "created_at" | "format_filter" | "day_filter" | "theatre_filter"> & { format_filter?: string | null; day_filter?: string | null; theatre_filter?: string | null }): number | null {
   try {
     const r = db
       .query(
-        `INSERT INTO watches (user_id, channel_id, city, slug, event_code, date, title, created_at, format_filter, day_filter)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        `INSERT INTO watches (user_id, channel_id, city, slug, event_code, date, title, created_at, format_filter, day_filter, theatre_filter)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       )
-      .get(w.user_id, w.channel_id, w.city, w.slug, w.event_code, w.date, w.title, now(), w.format_filter ?? null, w.day_filter ?? null) as { id: number };
+      .get(w.user_id, w.channel_id, w.city, w.slug, w.event_code, w.date, w.title, now(), w.format_filter ?? null, w.day_filter ?? null, w.theatre_filter ?? null) as { id: number };
     return r.id;
   } catch {
     return null; // UNIQUE violation == already watching this

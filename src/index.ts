@@ -12,7 +12,7 @@ import {
 } from "./db.ts";
 import {
   FORMAT_CHOICES, DAY_CHOICES, normaliseFormats, normaliseDays, matchesFormat,
-  matchesDay, filterSummary,
+  matchesDay, matchesTheatre, normaliseTheatres, filterSummary,
 } from "./filters.ts";
 import { staggerBounds, staggerDelayMs } from "./stagger.ts";
 
@@ -48,13 +48,14 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   let target;
   const formatFilter = normaliseFormats(i.options.getString("format"));
   const dayFilter = normaliseDays(i.options.getString("days"));
+  const theatreFilter = normaliseTheatres(i.options.getString("theatre"));
   try {
     const parsed = parseWatchUrl(i.options.getString("link", true));
     const dateOpt = i.options.getString("date")?.trim();
     // "any" (or a link with no date and no date option) subscribes to the movie:
     // ping me every time a NEW date unlocks, rather than watching one date.
     const wantsAny = dateOpt ? /^(any|all|every|new)$/i.test(dateOpt) : !parsed.date;
-    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter));
+    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter, theatreFilter));
 
     const date = dateOpt ? normaliseDate(dateOpt) : parsed.date!;
     if (date < todayIST()) {
@@ -100,12 +101,12 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   const id = addWatch({
     user_id: i.user.id, channel_id: i.channelId, city: target.city, slug: target.slug,
     event_code: target.eventCode, date: target.date, title,
-    format_filter: formatFilter, day_filter: dayFilter,
+    format_filter: formatFilter, day_filter: dayFilter, theatre_filter: theatreFilter,
   });
   if (id === null) return void i.editReply("You're already watching that movie and date. `/list` to see it.");
 
   await i.editReply(
-    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter }) }),
+    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, theatre_filter: theatreFilter }) }),
   );
 }
 
@@ -119,6 +120,7 @@ async function subscribeToMovie(
   parsed: { city: string; slug: string; eventCode: string },
   formatFilter: string | null,
   dayFilter: string | null,
+  theatreFilter: string | null,
 ) {
   if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
     return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
@@ -142,7 +144,7 @@ async function subscribeToMovie(
   const id = addWatch({
     user_id: i.user.id, channel_id: i.channelId, city: parsed.city, slug: parsed.slug,
     event_code: parsed.eventCode, date: SUBSCRIPTION, title,
-    format_filter: formatFilter, day_filter: dayFilter,
+    format_filter: formatFilter, day_filter: dayFilter, theatre_filter: theatreFilter,
   });
   if (id === null) return void i.editReply("You're already subscribed to that movie. `/list` to see it.");
 
@@ -150,7 +152,7 @@ async function subscribeToMovie(
   if (venues) recordSeenVenues(id, venues.map((v) => v.code));
 
   await i.editReply(
-    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter }) }),
+    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, theatre_filter: theatreFilter }) }),
   );
 }
 
@@ -199,6 +201,9 @@ async function checkSubscription(w: Watch) {
   // than a format checked for the cinema. Documented in the README Commands section.
   // Filtering this half needs showtimes-or-attributes per venue plus careful coalescing,
   // so it is a deliberate gap rather than an oversight (see issue #21).
+  //
+  // theatre_filter IS applied here: the venue's name and code are already in hand, so
+  // it costs no extra request and needs none of the coalescing above.
   let freshVenues: { code: string; name: string }[] = [];
   if (venues) {
     if (shouldSilentSeedVenues(w.id)) {
@@ -206,6 +211,7 @@ async function checkSubscription(w: Watch) {
     } else {
       const known = new Set(seenVenues(w.id));
       freshVenues = venues.filter((v) => !known.has(v.code));
+      if (w.theatre_filter) freshVenues = freshVenues.filter((v) => matchesTheatre(v.name, v.code, w.theatre_filter!));
     }
   }
 
@@ -215,15 +221,19 @@ async function checkSubscription(w: Watch) {
   // Apply day filter to fresh dates before announcing.
   if (w.day_filter) freshDates = freshDates.filter((d) => matchesDay(d, w.day_filter!));
 
-  // Format filter: only announce dates that actually have matching shows.
-  // Costs an extra fetchShowtimes per fresh date — only spent when a format filter is set.
+  // Format / theatre filters: only announce dates that actually have matching shows.
+  // Costs an extra fetchShowtimes per fresh date — only spent when one of them is set,
+  // and a single fetch covers both so adding a theatre filter never doubles the requests.
   let matchedFormats: string[] = [];
-  if (w.format_filter && freshDates.length) {
+  if ((w.format_filter || w.theatre_filter) && freshDates.length) {
     const kept: string[] = [];
     for (const d of freshDates) {
       try {
         const shows = showsOnDate((await fetchShowtimes({ city: w.city, slug: w.slug, eventCode: w.event_code, date: d })).shows, d);
-        const hits = shows.filter((s) => matchesFormat(s.attributes, w.format_filter!));
+        const hits = shows.filter((s) =>
+          (!w.format_filter || matchesFormat(s.attributes, w.format_filter))
+          && (!w.theatre_filter || matchesTheatre(s.venueName, s.venueCode, w.theatre_filter)),
+        );
         if (hits.length) {
           kept.push(d);
           for (const h of hits) if (h.attributes && !matchedFormats.includes(h.attributes)) matchedFormats.push(h.attributes);
@@ -284,6 +294,7 @@ async function checkWatch(w: Watch) {
   let filtered = open;
   if (w.format_filter) filtered = filtered.filter((s) => matchesFormat(s.attributes, w.format_filter!));
   if (w.day_filter) filtered = filtered.filter((s) => matchesDay(s.showDateCode, w.day_filter!));
+  if (w.theatre_filter) filtered = filtered.filter((s) => matchesTheatre(s.venueName, s.venueCode, w.theatre_filter!));
   if (!filtered.length) return; // shows exist but none match — stay silent, keep watching
 
   // Same rule: a watch is only "done its job" once the user was actually told.

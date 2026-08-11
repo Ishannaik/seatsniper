@@ -269,7 +269,7 @@ export function alreadyOnSale(opts: {
   return { embeds: [e], components: [bookButton(opts.url)] };
 }
 
-export function watchList(rows: { id: number; title: string; city: string; date: string; fail_count: number; last_ok_at: number | null; format_filter?: string | null; day_filter?: string | null }[]) {
+export function watchList(rows: { id: number; title: string; city: string; date: string; fail_count: number; last_ok_at: number | null; format_filter?: string | null; day_filter?: string | null; theatre_filter?: string | null }[]) {
   const body = rows
     .map((w) => {
       const state =
@@ -277,8 +277,8 @@ export function watchList(rows: { id: number; title: string; city: string; date:
         : w.last_ok_at ? `checked <t:${w.last_ok_at}:R>`
         : "not checked yet";
       const what = w.date === "" ? "every new date or cinema" : prettyDate(w.date);
-      const filt = (w.format_filter || w.day_filter)
-        ? `\n🎯 ${[w.format_filter, w.day_filter].filter(Boolean).join(" · ")}`
+      const filt = (w.format_filter || w.theatre_filter || w.day_filter)
+        ? `\n🎯 ${[w.format_filter, w.theatre_filter, w.day_filter].filter(Boolean).join(" · ")}`
         : "";
       return `**${w.title}** — ${what}\n${titleCase(w.city)} · ${state} · \`/stop id:${w.id}\`${filt}`;
     })
@@ -337,14 +337,15 @@ export function help() {
               "until you stop it. Good for a film that isn't out yet.",
           },
           {
-            name: "Filter by format / day",
+            name: "Filter by format / theatre / day",
             value:
-              "```/watch link:<paste> format:IMAX,4DX days:fri,sat,sun```" +
+              "```/watch link:<paste> format:IMAX,4DX theatre:PVR,INOX days:fri,sat,sun```" +
               "Optional. Only pings when a matching show appears. " +
               "Formats: IMAX, 4DX, ScreenX, 3D, 2D, MX4D, Dolby Atmos…\n" +
-              "_Both filter date and showtime alerts only. " +
-              "**New cinema** alerts are never filtered — a new venue pings you whatever " +
-              "format or day it lists._",
+              "`theatre:` matches part of the cinema name or its venue code.\n" +
+              "_`format:` and `days:` filter date and showtime alerts only — a **new cinema** " +
+              "pings you whatever format or day it lists. `theatre:` also filters new-cinema " +
+              "alerts._",
           },
           {
             name: "Manage",
