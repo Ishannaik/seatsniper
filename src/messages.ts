@@ -272,8 +272,14 @@ export function alreadyOnSale(opts: {
 export function watchList(rows: { id: number; title: string; city: string; date: string; fail_count: number; last_ok_at: number | null; format_filter?: string | null; day_filter?: string | null }[]) {
   const body = rows
     .map((w) => {
+      // The failing branch keeps its last-ok time. That is the one state where someone
+      // actually needs it: "I can't read BookMyShow" alone does not say whether the watch
+      // ever worked, so a reader cannot tell a watch that broke ten minutes ago from one
+      // that never got off the ground. Same relative timestamp, no extra line.
       const state =
-        w.fail_count >= 3 ? "can't read BookMyShow"
+        w.fail_count >= 3 ?
+          w.last_ok_at ? `can't read BookMyShow · last checked <t:${w.last_ok_at}:R>`
+          : "can't read BookMyShow · never checked"
         : w.last_ok_at ? `checked <t:${w.last_ok_at}:R>`
         : "not checked yet";
       const what = w.date === "" ? "every new date or cinema" : prettyDate(w.date);
