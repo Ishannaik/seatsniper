@@ -17,7 +17,9 @@ const commands = [
     .addStringOption((o) =>
       o.setName("format").setDescription("Only ping for these formats, e.g. IMAX,4DX,ScreenX").setAutocomplete(true))
     .addStringOption((o) =>
-      o.setName("days").setDescription("Only ping on these days, e.g. fri,sat,sun").setAutocomplete(true)),
+      o.setName("days").setDescription("Only ping on these days, e.g. fri,sat,sun").setAutocomplete(true))
+    .addStringOption((o) =>
+      o.setName("theatre").setDescription("Only ping for these cinemas, e.g. PVR,INOX,IMAX Wadala")),
   new SlashCommandBuilder().setName("help").setDescription("How SeatSniper works"),
   new SlashCommandBuilder().setName("list").setDescription("Show your active watches"),
   new SlashCommandBuilder()

@@ -156,3 +156,24 @@ test("removeWatch rejects cross-user deletes and allows the owner", () => {
   expect(removeWatch(aId, "user-a")).toBe(true);
   expect(listWatches("user-a")).toEqual([]);
 });
+
+test("theatre_filter round-trips through addWatch and listWatches", () => {
+  addWatch({
+    user_id: "u-theatre",
+    channel_id: "c1",
+    city: "mumbai",
+    slug: "test-movie",
+    event_code: "ET-THEATRE",
+    date: "20260730",
+    title: "Test Movie",
+    theatre_filter: "PVR,INOX",
+  });
+
+  expect(listWatches("u-theatre")[0]?.theatre_filter).toBe("PVR,INOX");
+});
+
+test("theatre_filter defaults to null when the option is omitted", () => {
+  const id = addWatchFor("u-no-theatre", "EVENT-NT");
+
+  expect(listWatches("u-no-theatre").find((w) => w.id === id)?.theatre_filter).toBeNull();
+});
