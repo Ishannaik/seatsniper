@@ -113,6 +113,10 @@ docker compose up -d
 
 The database lives in a named volume, so the bot survives container restarts.
 
+The image only copies `src/` and `assets/` (see `Dockerfile`); `.dockerignore`
+keeps `.env`, the SQLite file, and other local-only paths out of the build
+context.
+
 There is no HTTP healthcheck. `docker compose ps` showing "up" only means the
 process is running, not that the bot is logged in and polling. Configure
 `UPTIME_KUMA_PUSH_URL`; the bot pings it after each poll, so a missing push
