@@ -272,6 +272,7 @@ docs/            design specs and measured findings
 | Slash commands missing | Global vs guild registration | Set `DISCORD_GUILD_ID` for instant guild commands |
 | DMs never arrive | User closed DMs | The bot falls back to a channel; open DMs with the bot |
 | Integration tests fail in CI | Live BookMyShow from US runners | Keep `integration.ts` manual and not part of CI |
+| Watches feel "bursty" or bot-like | Stagger disabled or too small | Check `STAGGER_MS_MIN` / `STAGGER_MS_MAX` (default 2000-5000 ms); `0`/`0` is allowed but discouraged |
 
 ## ⚠️ Limitations & hosting
 
