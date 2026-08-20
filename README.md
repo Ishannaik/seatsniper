@@ -148,7 +148,7 @@ Bun auto-loads `.env` from the working directory.
 | --- | --- |
 | `/watch link:<url> date:YYYY-MM-DD` | DM once when that date opens, then delete the watch |
 | `/watch link:<url> date:any` | Subscribe. DM when a new date or cinema appears |
-| `/watch link:<url> format:IMAX,4DX days:fri,sat` | Optional filters on any watch. Ping only for these formats or weekdays |
+| `/watch link:<url> format:IMAX,4DX days:fri,sat after:18:00 before:23:00` | Optional filters on any watch. Ping only for these formats, weekdays, or start times. `after:`/`before:` are IST wall clock, 24-hour (`18:00`) or 12-hour (`6:00 PM`); `before:` is exclusive and the window cannot wrap past midnight |
 | `/list` | Show your active watches |
 | `/stop id:<n>` | Stop watch `n` from `/list` |
 | `/help` | How the bot works |
