@@ -272,6 +272,7 @@ docs/            design specs and measured findings
 | Slash commands missing | Global vs guild registration | Set `DISCORD_GUILD_ID` for instant guild commands |
 | DMs never arrive | User closed DMs | The bot falls back to a channel; open DMs with the bot |
 | Integration tests fail in CI | Live BookMyShow from US runners | Keep `integration.ts` manual and not part of CI |
+| Alerts feel late | Poll cycle is 10 minutes by default | Check `POLL_INTERVAL_SEC` (default 600 s); Uptime Kuma's heartbeat interval should sit a bit above it |
 
 ## ⚠️ Limitations & hosting
 
