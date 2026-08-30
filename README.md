@@ -241,6 +241,7 @@ giving a fixed delay, rather than being silently swapped.
 
 ```
 src/
+  src/time-filter.ts
   index.ts      bot, poll loop, slash handlers
   bms.ts        BookMyShow client, URL parsing, availability
   db.ts         SQLite: watches, seen dates, seen venues
