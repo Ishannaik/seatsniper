@@ -8,6 +8,12 @@ export function normaliseFormats(raw: string | null): string | null {
   return raw.split(",").map((f) => f.trim().toUpperCase()).filter(Boolean).join(",") || null;
 }
 
+/** "pvr , INOX,imax wadala" -> "PVR,INOX,IMAX WADALA" | null */
+export function normaliseTheatres(raw: string | null): string | null {
+  if (!raw?.trim()) return null;
+  return raw.split(",").map((t) => t.trim().replace(/\s+/g, " ").toUpperCase()).filter(Boolean).join(",") || null;
+}
+
 /** "Fri, SAT ,sun" -> "fri,sat,sun" | null */
 export function normaliseDays(raw: string | null): string | null {
   if (!raw?.trim()) return null;
@@ -32,15 +38,33 @@ export function matchesDay(dateCode: string, filter: string): boolean {
   return filter.split(",").includes(dayOfWeek(dateCode));
 }
 
+/**
+ * Does a show's venue match the filter? Case-insensitive substring against the
+ * venue name *and* the venue code, so "PVR" catches "PVR: Phoenix Palladium"
+ * and a user who pasted a code like "IMOB" still matches. Whitespace is
+ * collapsed on both sides so "IMAX  Wadala" matches "IMAX Wadala". The two are
+ * joined by a NUL, which cannot occur in either, so a needle can never match
+ * by straddling the name/code boundary.
+ */
+export function matchesTheatre(venueName: string, venueCode: string, filter: string): boolean {
+  const haystack = `${venueName ?? ""}\u0000${venueCode ?? ""}`.toUpperCase().replace(/\s+/g, " ");
+  return filter.split(",").some((t) => {
+    const needle = t.trim().replace(/\s+/g, " ");
+    return needle.length > 0 && haystack.includes(needle);
+  });
+}
+
 /** Human-readable filter summary for embeds, e.g. "IMAX · 4DX · Fri, Sat, Sun". */
 export function filterSummary(w: {
   format_filter: string | null;
   day_filter: string | null;
+  theatre_filter?: string | null;
   after_filter?: string | null;
   before_filter?: string | null;
 }): string | null {
   const parts: string[] = [];
   if (w.format_filter) parts.push(w.format_filter.split(",").join(" · "));
+  if (w.theatre_filter) parts.push(w.theatre_filter.split(",").join(" · "));
   if (w.day_filter) parts.push(w.day_filter.split(",").map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(", "));
   // One phrase for the window rather than two, so "after 18:00 · before 23:00" reads as
   // the single constraint it is.

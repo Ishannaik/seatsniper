@@ -13,7 +13,7 @@ import {
 import { parseTimeFilter, matchesTimeFilter } from "./time-filter.ts";
 import {
   FORMAT_CHOICES, DAY_CHOICES, normaliseFormats, normaliseDays, matchesFormat,
-  matchesDay, filterSummary,
+  matchesDay, matchesTheatre, normaliseTheatres, filterSummary,
 } from "./filters.ts";
 import { staggerBounds, staggerDelayMs } from "./stagger.ts";
 
@@ -72,13 +72,14 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   const afterFilter = afterRaw;
   const beforeFilter = beforeRaw;
 
+  const theatreFilter = normaliseTheatres(i.options.getString("theatre"));
   try {
     const parsed = parseWatchUrl(i.options.getString("link", true));
     const dateOpt = i.options.getString("date")?.trim();
     // "any" (or a link with no date and no date option) subscribes to the movie:
     // ping me every time a NEW date unlocks, rather than watching one date.
     const wantsAny = dateOpt ? /^(any|all|every|new)$/i.test(dateOpt) : !parsed.date;
-    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter, afterFilter, beforeFilter));
+    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter, afterFilter, beforeFilter, theatreFilter));
 
     const date = dateOpt ? normaliseDate(dateOpt) : parsed.date!;
     if (date < todayIST()) {
@@ -125,12 +126,12 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
     user_id: i.user.id, channel_id: i.channelId, city: target.city, slug: target.slug,
     event_code: target.eventCode, date: target.date, title,
     format_filter: formatFilter, day_filter: dayFilter,
-    after_filter: afterFilter, before_filter: beforeFilter,
+    after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter,
   });
   if (id === null) return void i.editReply("You're already watching that movie and date. `/list` to see it.");
 
   await i.editReply(
-    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter }) }),
+    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter }) }),
   );
 }
 
@@ -146,6 +147,7 @@ async function subscribeToMovie(
   dayFilter: string | null,
   afterFilter: string | null,
   beforeFilter: string | null,
+  theatreFilter: string | null,
 ) {
   if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
     return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
@@ -170,7 +172,7 @@ async function subscribeToMovie(
     user_id: i.user.id, channel_id: i.channelId, city: parsed.city, slug: parsed.slug,
     event_code: parsed.eventCode, date: SUBSCRIPTION, title,
     format_filter: formatFilter, day_filter: dayFilter,
-    after_filter: afterFilter, before_filter: beforeFilter,
+    after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter,
   });
   if (id === null) return void i.editReply("You're already subscribed to that movie. `/list` to see it.");
 
@@ -178,7 +180,7 @@ async function subscribeToMovie(
   if (venues) recordSeenVenues(id, venues.map((v) => v.code));
 
   await i.editReply(
-    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter }) }),
+    msg.armedForMovie({ title, city: parsed.city, openNow: dates, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter }) }),
   );
 }
 
@@ -227,6 +229,9 @@ async function checkSubscription(w: Watch) {
   // than a format checked for the cinema. Documented in the README Commands section.
   // Filtering this half needs showtimes-or-attributes per venue plus careful coalescing,
   // so it is a deliberate gap rather than an oversight (see issue #21).
+  //
+  // theatre_filter IS applied here: the venue's name and code are already in hand, so
+  // it costs no extra request and needs none of the coalescing above.
   let freshVenues: { code: string; name: string }[] = [];
   if (venues) {
     if (shouldSilentSeedVenues(w.id)) {
@@ -234,6 +239,7 @@ async function checkSubscription(w: Watch) {
     } else {
       const known = new Set(seenVenues(w.id));
       freshVenues = venues.filter((v) => !known.has(v.code));
+      if (w.theatre_filter) freshVenues = freshVenues.filter((v) => matchesTheatre(v.name, v.code, w.theatre_filter!));
     }
   }
 
@@ -243,14 +249,14 @@ async function checkSubscription(w: Watch) {
   // Apply day filter to fresh dates before announcing.
   if (w.day_filter) freshDates = freshDates.filter((d) => matchesDay(d, w.day_filter!));
 
-  // Format and time-of-day filters: only announce dates that actually have a matching
-  // show. Costs an extra fetchShowtimes per fresh date — spent only when one of those
-  // filters is set. The time window needs the same fetch as format (a date alone says
-  // nothing about start times), so the two share one pass rather than fetching twice.
+  // Format, time-of-day and theatre filters: only announce dates that actually have a
+  // matching show. Costs an extra fetchShowtimes per fresh date — spent only when one of
+  // those filters is set. A date alone says nothing about start times or venues, so all
+  // three share a single pass rather than fetching once per filter.
   let matchedFormats: string[] = [];
   const afterMinutes = w.after_filter ? parseTimeFilter(w.after_filter) : null;
   const beforeMinutes = w.before_filter ? parseTimeFilter(w.before_filter) : null;
-  const needsShowtimes = Boolean(w.format_filter) || afterMinutes !== null || beforeMinutes !== null;
+  const needsShowtimes = Boolean(w.format_filter) || Boolean(w.theatre_filter) || afterMinutes !== null || beforeMinutes !== null;
   if (needsShowtimes && freshDates.length) {
     const kept: string[] = [];
     for (const d of freshDates) {
@@ -259,6 +265,7 @@ async function checkSubscription(w: Watch) {
         const hits = shows.filter(
           (sh) =>
             (!w.format_filter || matchesFormat(sh.attributes, w.format_filter)) &&
+            (!w.theatre_filter || matchesTheatre(sh.venueName, sh.venueCode, w.theatre_filter)) &&
             matchesTimeFilter(sh.epoch, afterMinutes, beforeMinutes),
         );
         if (hits.length) {
@@ -328,6 +335,7 @@ async function checkWatch(w: Watch) {
     filtered = filtered.filter((s) =>
       matchesTimeFilter(s.epoch, parseTimeFilter(w.after_filter ?? ""), parseTimeFilter(w.before_filter ?? "")));
   }
+  if (w.theatre_filter) filtered = filtered.filter((s) => matchesTheatre(s.venueName, s.venueCode, w.theatre_filter!));
   if (!filtered.length) return; // shows exist but none match — stay silent, keep watching
 
   // Same rule: a watch is only "done its job" once the user was actually told.

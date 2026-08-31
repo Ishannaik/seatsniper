@@ -21,7 +21,9 @@ const commands = [
     .addStringOption((o) =>
       o.setName("after").setDescription("Only ping for shows starting at or after this IST time, e.g. 18:00"))
     .addStringOption((o) =>
-      o.setName("before").setDescription("Only ping for shows starting before this IST time, e.g. 12:00")),
+      o.setName("before").setDescription("Only ping for shows starting before this IST time, e.g. 12:00"))
+    .addStringOption((o) =>
+      o.setName("theatre").setDescription("Only ping for these cinemas, e.g. PVR,INOX,IMAX Wadala")),
   new SlashCommandBuilder().setName("help").setDescription("How SeatSniper works"),
   new SlashCommandBuilder().setName("list").setDescription("Show your active watches"),
   new SlashCommandBuilder()
