@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Show } from "./bms.ts";
-import { LIVE, alreadyOnSale, newCinemas, subscriptionAlert, ticketsLive, watchList } from "./messages.ts";
+import { LIVE, alreadyOnSale, help, newCinemas, subscriptionAlert, ticketsLive, watchList } from "./messages.ts";
 
 const URL = "https://in.bookmyshow.com/movies/mumbai/foo/buytickets/ET00000001";
 
@@ -211,4 +211,19 @@ test("watchList still keeps each watch to two lines without filters", () => {
   // Mobile-friendly: the state line grew, so check it did not grow a line.
   const { embeds } = watchList([watchRow({ fail_count: 3, last_ok_at: 1786246591 })]);
   expect(embeds[0]!.data.description!.split("\n")).toHaveLength(2);
+});
+
+// --- /help time-filter mentions (issue #109) ---
+
+test("help embed mentions after: so the time filter is discoverable from /help", () => {
+  // #84 landed after/before on /watch. The /help embed carries after: so users
+  // can discover it. Pin it so a future copy edit cannot drop it. The matching
+  // before: assertion lands as a follow-up once #87 documents before: in the
+  // same embed field.
+  const { embeds } = help();
+  const filter = embeds[0]!.data.fields?.find(
+    (field) => field.name === "Filter by format / theatre / day",
+  );
+  const value = filter?.value ?? "";
+  expect(value).toContain("after:");
 });
