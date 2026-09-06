@@ -107,10 +107,17 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
 
   let target;
   const formatFilter = normaliseFormats(i.options.getString("format"));
-  const dayFilter = normaliseDays(i.options.getString("days"));
 
-  // Reject an unparseable time instead of silently dropping the filter: a watch that
-  // quietly ignores "after 18:00" fires at 10am and looks broken.
+  // Reject an unreadable filter instead of silently dropping it: a watch that quietly
+  // ignores "days: wknd" or "after 18:00" still fires and looks broken.
+  const daysRaw = i.options.getString("days")?.trim() || null;
+  const dayFilter = normaliseDays(daysRaw);
+  if (daysRaw !== null && dayFilter === null) {
+    return void i.editReply(
+      `❌ I couldn't read \`days: ${daysRaw}\` — use short weekday names like \`fri,sat,sun\`.`,
+    );
+  }
+
   const afterRaw = i.options.getString("after")?.trim() || null;
   const beforeRaw = i.options.getString("before")?.trim() || null;
   const afterMinutes = afterRaw === null ? null : parseTimeFilter(afterRaw);

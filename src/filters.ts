@@ -14,11 +14,12 @@ export function normaliseTheatres(raw: string | null): string | null {
   return raw.split(",").map((t) => t.trim().replace(/\s+/g, " ").toUpperCase()).filter(Boolean).join(",") || null;
 }
 
-/** "Fri, SAT ,sun" -> "fri,sat,sun" | null */
+/** "Fri, SAT ,sun" -> "fri,sat,sun". null when unset, or when any token isn't a weekday. */
 export function normaliseDays(raw: string | null): string | null {
   if (!raw?.trim()) return null;
-  const days = raw.split(",").map((d) => d.trim().toLowerCase().slice(0, 3)).filter((d) => DAY_CHOICES.includes(d));
-  return days.length ? days.join(",") : null;
+  const days = raw.split(",").map((d) => d.trim().toLowerCase().slice(0, 3)).filter(Boolean);
+  if (!days.length || days.some((d) => !DAY_CHOICES.includes(d))) return null;
+  return days.join(",");
 }
 
 /** YYYYMMDD -> "mon"|"tue"|...|"sun" (UTC, host-TZ-independent). */

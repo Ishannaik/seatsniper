@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { normaliseFormats, matchesFormat, filterSummary } from "./filters.ts";
+import { normaliseFormats, normaliseDays, matchesFormat, filterSummary } from "./filters.ts";
 
 test("normaliseFormats uppercases and trims every variant", () => {
   expect(normaliseFormats("ScreenX")).toBe("SCREENX");
@@ -18,6 +18,29 @@ test("normaliseFormats returns null for empty input", () => {
   expect(normaliseFormats("")).toBeNull();
   expect(normaliseFormats("  ")).toBeNull();
   expect(normaliseFormats(null)).toBeNull();
+});
+
+// --- normaliseDays: an unreadable days: value is rejected by cmdWatch, never silently dropped ---
+
+test("normaliseDays keeps a list when every token is a real weekday", () => {
+  expect(normaliseDays("fri,sat")).toBe("fri,sat");
+  expect(normaliseDays("Fri, SAT ,sun")).toBe("fri,sat,sun");
+  expect(normaliseDays("friday,saturday")).toBe("fri,sat");
+});
+
+test("normaliseDays returns null when no days filter was given", () => {
+  expect(normaliseDays(null)).toBeNull();
+  expect(normaliseDays("")).toBeNull();
+  expect(normaliseDays("   ")).toBeNull();
+});
+
+test("normaliseDays returns null if any token is not a weekday", () => {
+  // Before: a stray "xyz" was dropped and "fri" kept, so the watch fired on
+  // Fridays only while the user believed they had asked for more. Now the whole
+  // value is rejected so cmdWatch can tell them.
+  expect(normaliseDays("weekend")).toBeNull();
+  expect(normaliseDays("fri,xyz")).toBeNull();
+  expect(normaliseDays("funday,fri")).toBeNull();
 });
 
 // --- filterSummary, including the time-of-day window (issue #22) ---
