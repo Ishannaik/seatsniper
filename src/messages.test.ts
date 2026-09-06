@@ -213,17 +213,17 @@ test("watchList still keeps each watch to two lines without filters", () => {
   expect(embeds[0]!.data.description!.split("\n")).toHaveLength(2);
 });
 
-// --- /help time-filter mentions (issue #109) ---
+// --- /help time-filter contract (issues #87, #109) ---
 
-test("help embed mentions after: so the time filter is discoverable from /help", () => {
-  // #84 landed after/before on /watch. The /help embed carries after: so users
-  // can discover it. Pin it so a future copy edit cannot drop it. The matching
-  // before: assertion lands as a follow-up once #87 documents before: in the
-  // same embed field.
+test("help embed documents the time-filter contract", () => {
   const { embeds } = help();
   const filter = embeds[0]!.data.fields?.find(
     (field) => field.name === "Filter by format / theatre / day",
   );
   const value = filter?.value ?? "";
   expect(value).toContain("after:");
+  expect(value).toContain("before:");
+  expect(value).toContain("IST");
+  expect(value).toContain("exclusive");
+  expect(value).toContain("midnight");
 });

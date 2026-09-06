@@ -349,10 +349,11 @@ export function help() {
           {
             name: "Filter by format / theatre / day",
             value:
-              "```/watch link:<paste> format:IMAX,4DX theatre:PVR,INOX days:fri,sat,sun after:18:00```" +
+              "```/watch link:<paste> format:IMAX,4DX theatre:PVR,INOX days:fri,sat,sun after:18:00 before:23:00```" +
               "Optional. Only pings when a matching show appears. " +
               "Formats: IMAX, 4DX, ScreenX, 3D, 2D, MX4D, Dolby Atmos…\n" +
               "`theatre:` matches part of the cinema name or its venue code.\n" +
+              "`after:` / `before:` use IST; `before:` is exclusive, and the window cannot wrap past midnight.\n" +
               "_`format:` and `days:` filter date and showtime alerts only — a **new cinema** " +
               "pings you whatever format or day it lists. `theatre:` also filters new-cinema " +
               "alerts._",
