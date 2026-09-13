@@ -250,14 +250,15 @@ giving a fixed delay, rather than being silently swapped.
 
 ```
 src/
-  index.ts      bot, poll loop, slash handlers
-  bms.ts        BookMyShow client, URL parsing, availability
-  db.ts         SQLite: watches, seen dates, seen venues
-  messages.ts   Discord copy and embeds
-  stagger.ts    inter-watch stagger config (STAGGER_MS_MIN / STAGGER_MS_MAX)
-  register.ts   slash command registration
-assets/          logo
-docs/            design specs and measured findings
+  index.ts        bot, poll loop, slash handlers
+  bms.ts          BookMyShow client, URL parsing, availability
+  db.ts           SQLite: watches, seen dates, seen venues
+  messages.ts     Discord copy and embeds
+  stagger.ts      inter-watch stagger config (STAGGER_MS_MIN / STAGGER_MS_MAX)
+  register.ts     slash command registration
+  time-filter.ts  IST after/before time filter parser and show matcher
+assets/            logo
+docs/              design specs and measured findings
 ```
 
 <a id="bookmyshow-quirks"></a>
