@@ -17,6 +17,7 @@ import {
   matchesDay, matchesTheatre, normaliseTheatres, filterSummary,
 } from "./filters.ts";
 import { staggerBounds, staggerDelayMs } from "./stagger.ts";
+import { normaliseDate } from "./date.ts";
 
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) throw new Error("DISCORD_TOKEN missing — copy .env.example to .env");
@@ -28,17 +29,6 @@ const STAGGER = staggerBounds();
 /** Optional Uptime Kuma Push URL. Bot pings it after each poll so Kuma can alert if we die. */
 const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL?.trim() || "";
 
-
-/** "2026-07-30" | "20260730" -> "20260730". Throws on anything else. */
-function normaliseDate(input: string): string {
-  const d = input.trim().replace(/[-/]/g, "");
-  if (!/^\d{8}$/.test(d)) throw new BmsError("bad_url", `Date must look like 2026-07-30, got "${input}"`);
-  const [y, m, day] = [+d.slice(0, 4), +d.slice(4, 6), +d.slice(6, 8)];
-  if (m < 1 || m > 12 || day < 1 || day > 31) {
-    throw new BmsError("bad_url", `"${input}" isn't a real date.`);
-  }
-  return d;
-}
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
