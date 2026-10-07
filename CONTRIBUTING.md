@@ -52,6 +52,7 @@ The full write-up is in
 
 ## Sending a PR
 
+- Join the Discord (https://discord.gg/KKvtRhQvRv) before picking an issue, and claim it there or comment on the issue.
 - Keep the change to one thing. If a PR touches more than one feature, split
   it.
 - Run `bun test` before opening the PR. The CI workflow runs the same tests.

@@ -305,6 +305,11 @@ constraints the bot was built around. Report security issues privately, see
 [good first issues](https://github.com/Ishannaik/seatsniper/labels/good%20first%20issue)
 label.
 
+## Community
+
+Join the [Discord](https://discord.gg/KKvtRhQvRv) to chat with other contributors and get help.
+Share feedback, swap ideas, or ask questions before opening a PR.
+
 ## 📄 License
 
 MIT, see [LICENSE](LICENSE).
