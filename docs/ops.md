@@ -1,5 +1,10 @@
 # Operations
 
+The bot keeps everything in one SQLite file, set by `DB_PATH` (see
+[`.env.example`](../.env.example)). A host install defaults to `seatsniper.db` in
+the working directory; `docker-compose.yml` sets `/data/seatsniper.db`, inside the
+`seatsniper_data` volume. Run the SQL below against that file.
+
 ## Clean orphan `seen_dates` / `seen_venues` rows
 
 If the bot ran with SQLite `foreign_keys` disabled, `/stop` can leave orphan
