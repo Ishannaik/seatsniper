@@ -45,7 +45,7 @@ folders that are not there.
 
 Full write-up: `docs/superpowers/specs/2026-07-27-bms-access-findings.md`.
 
-1. **TLS profile is Safari.** `node-tls-client` with `safari_ios_18_0`. Never Chrome profiles — they get Cloudflare challenges. Never add custom headers on top of the profile; mismatched fingerprints cause 403s.
+1. **TLS profile is Safari.** `node-tls-client` with `safari_ios_17_0` (was `safari_ios_18_0` until it started getting 403s on 2026-11-17; override with `BMS_TLS_PROFILE`). Never Chrome profiles — they get Cloudflare challenges. Never add custom headers on top of the profile; mismatched fingerprints cause 403s.
 2. **Availability is a field comparison.** BookMyShow silently substitutes the nearest bookable date when the requested date is closed. URL / HTTP status / `currentDateCode` all lie. Only `showDateCode` on each show is trustworthy. No keyword or date-token-frequency heuristics.
 3. **Errors are not empty results.** Unparseable / blocked / network failures throw `BmsError`. Never swallow them into `[]` — that is how prior art stayed silently dead forever.
 4. **Validate watches at creation.** Hit live BMS when `/watch` is saved so a bad link fails immediately instead of never firing.

@@ -225,7 +225,7 @@ its geographic restrictions can still block datacenter IPs outside India.
 | `STAGGER_MS_MAX` | no | `5000` | Longest pause between two watches inside one cycle |
 | `DB_PATH` | no | `seatsniper.db` | SQLite file location |
 | `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll |
-| `BMS_TLS_PROFILE` | no | `safari_ios_18_0` | `node-tls-client` profile for the BookMyShow session. Rotate only between **Safari/Firefox** profiles if Cloudflare starts blocking (see [BookMyShow quirks](#bookmyshow-quirks)). Chrome profiles are rejected, not merely discouraged. An unknown or unsupported name fails at startup. |
+| `BMS_TLS_PROFILE` | no | `safari_ios_17_0` | `node-tls-client` profile for the BookMyShow session. Rotate only between **Safari/Firefox** profiles if Cloudflare starts blocking (see [BookMyShow quirks](#bookmyshow-quirks)). Chrome profiles are rejected, not merely discouraged. An unknown or unsupported name fails at startup. |
 
 Keep `POLL_INTERVAL_SEC` at or above 120-300 seconds for personal use. Faster
 polls do **not** require a residential IP; they increase request volume and

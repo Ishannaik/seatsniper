@@ -33,7 +33,7 @@ The full write-up is in
 [`docs/superpowers/specs/2026-07-27-bms-access-findings.md`](docs/superpowers/specs/2026-07-27-bms-access-findings.md).
 
 1. **TLS profile is Safari.** The poller uses `node-tls-client` with
-   `safari_ios_18_0`. Chrome profiles get Cloudflare challenges, and custom
+   `safari_ios_17_0`. Chrome profiles get Cloudflare challenges, and custom
    headers on top of the profile cause 403s. Do not add either.
 2. **Availability is a field comparison.** When the requested date is closed,
    BookMyShow silently substitutes the nearest bookable date. The URL, the

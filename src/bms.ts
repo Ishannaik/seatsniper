@@ -23,7 +23,11 @@ import * as tls from "node-tls-client";
 // in the file header. Only Safari/Firefox profiles are supported overrides;
 // Chrome profiles are served challenges by BookMyShow, so never make one the
 // default and never document one as an option.
-export const DEFAULT_TLS_PROFILE = "safari_ios_18_0";
+// Re-measured 2026-11-17 from Oracle with tls-client lib v1.18.1 (node-tls-client
+// fetches the latest lib whenever its tmpdir copy is missing): safari_ios_18_0,
+// safari_16_0, firefox_133 and chrome_131 all got 403; safari_ios_17_0 got 200
+// with a real page, 4/4 runs.
+export const DEFAULT_TLS_PROFILE = "safari_ios_17_0";
 
 /**
  * Which node-tls-client profile to open the session with.
@@ -460,12 +464,25 @@ export function fetchShowtimesCached(t: Target): Promise<Showtimes> {
   return p;
 }
 
-/** Exported for tests: the pure half of fetchBookableDates. */
+/**
+ * Exported for tests: the pure half of fetchBookableDates.
+ *
+ * Every `dateCode` on the page counts, with one exception: the page's own
+ * default date (`"additionalData":{"dateCode":…,"eventCode":…`; the date-strip
+ * CTAs carry `dateCode` followed by `uuid` instead). When the probe date is
+ * closed, BMS falls back to TODAY there, whether or not today has shows.
+ * Measured 2026-11-17 on Avengers: Doomsday, not yet on sale: the default was
+ * 20261117, the date strip marked it "date-disabled", and the page had zero
+ * shows. So the default date is trusted only when a show on the page carries
+ * that `showDateCode` (hard constraint #2: field comparison, not page shape).
+ */
 export function parseBookableDates(html: string): string[] {
+  const pageDefault = html.match(/"additionalData":\{"dateCode":"(\d{8})","eventCode":/)?.[1];
   const dates = new Set<string>();
   for (const m of html.matchAll(/"dateCode":"(\d{8})"/g)) {
     if (m[1] !== PROBE_DATE) dates.add(m[1]!);
   }
+  if (pageDefault && !html.includes(`"showDateCode":"${pageDefault}"`)) dates.delete(pageDefault);
   return [...dates].sort();
 }
 

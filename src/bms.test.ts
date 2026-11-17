@@ -161,6 +161,29 @@ test("bookable dates are deduped and sorted", () => {
   expect(parseBookableDates(html)).toEqual(["20260728", "20260803"]);
 });
 
+// Measured 2026-11-17 on Avengers: Doomsday (ET00439706, Mumbai), not yet on
+// sale. Probing 20991231 makes BMS fall back to TODAY as the page's own
+// additionalData.dateCode, while the date strip marks today "date-disabled" and
+// the page has zero shows. Reading that as bookable sent a subscription a
+// "new date: Mon 16 Nov" DM, then "Tue 17 Nov", one per midnight, forever.
+const COMING_SOON = `"additionalData":{"dateCode":"20261117","eventCode":"ET00439706","defaultSortId":"relevance"},` +
+  `"topStickyWidgets":[{"type":"horizontal-block-list","data":[{"type":"vertical-text-list","id":"20261117","styleId":"date-disabled"}]}]`;
+
+test("a page-default date with no shows is not bookable (coming-soon page)", () => {
+  expect(parseBookableDates(COMING_SOON)).toEqual([]);
+});
+
+// Same measurement on Scene (ET00516631), which is running: today is both the
+// page default AND has shows, and the strip carries CTA dateCodes for the
+// other open days. All three stay bookable.
+test("a page-default date that has shows stays bookable", () => {
+  const html = `"additionalData":{"dateCode":"20261117","eventCode":"ET00516631","defaultSortId":"relevance"} ` +
+    `"cta":{"type":"dateSelector","additionalData":{"dateCode":"20261117","uuid":"a"}} ` +
+    `"cta":{"type":"dateSelector","additionalData":{"dateCode":"20261118","uuid":"b"}} ` +
+    `"cta":{"type":"dateSelector","additionalData":{"dateCode":"20261119","uuid":"c"}} "showDateCode":"20261117"`;
+  expect(parseBookableDates(html)).toEqual(["20261117", "20261118", "20261119"]);
+});
+
 test("sessionId is stable across parses, so alerts can't repeat", () => {
   expect(parseShows(REAL).map((s) => s.sessionId)).toEqual(parseShows(REAL).map((s) => s.sessionId));
 });
@@ -187,7 +210,7 @@ test("a date with shows reads as available", () => {
 
 test("the TLS profile defaults to the pinned Safari one when unset", () => {
   expect(resolveTlsProfile({})).toBe(DEFAULT_TLS_PROFILE);
-  expect(DEFAULT_TLS_PROFILE).toBe("safari_ios_18_0");
+  expect(DEFAULT_TLS_PROFILE).toBe("safari_ios_17_0");
 });
 
 test("BMS_TLS_PROFILE overrides the default", () => {
