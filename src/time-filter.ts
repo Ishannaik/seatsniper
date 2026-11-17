@@ -32,10 +32,51 @@ export function matchesTimeFilter(
 ): boolean {
   if (afterMinutes == null && beforeMinutes == null) return true;
 
-  const istDate = new Date(epoch * 1000 + 5.5 * 3600_000);
-  const minutes = istDate.getUTCHours() * 60 + istDate.getUTCMinutes();
+  const minutes = istMinutes(epoch);
 
   if (afterMinutes != null && minutes < afterMinutes) return false;
   if (beforeMinutes != null && minutes >= beforeMinutes) return false;
   return true;
+}
+
+/** "202607280640" (IST wall clock) -> unix seconds. India is UTC+5:30, no DST. */
+export function istToEpoch(showDateTime: string): number {
+  const [y, mo, d, h, mi] = [
+    +showDateTime.slice(0, 4), +showDateTime.slice(4, 6), +showDateTime.slice(6, 8),
+    +showDateTime.slice(8, 10), +showDateTime.slice(10, 12),
+  ];
+  return Math.floor(Date.UTC(y!, mo! - 1, d!, h!, mi!) / 1000) - 5.5 * 3600;
+}
+
+
+/**
+ * "20260730" -> "Thu, 30 Jul".
+ *
+ * Builds the date in local time and formats it in local time, so the day never
+ * shifts across timezones. Assumes a well-formed BMS date code: callers must
+ * not pass the empty date a subscription watch carries (see `SUBSCRIPTION`),
+ * because `Number("")` is 0 and that formats as a plausible-looking 1899 date
+ * rather than failing. Pinned in `bms.test.ts`.
+ */
+export function prettyDate(yyyymmdd: string): string {
+  const d = new Date(
+    +yyyymmdd.slice(0, 4),
+    +yyyymmdd.slice(4, 6) - 1,
+    +yyyymmdd.slice(6, 8),
+  );
+  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+}
+
+export const IST_OFFSET_MS = 19_800_000;
+export function todayIST(now = Date.now()): string {
+  return new Date(now + IST_OFFSET_MS).toISOString().slice(0, 10).replaceAll('-', '');
+}
+export function istMinutes(epochSeconds: number): number {
+  const date = new Date(epochSeconds * 1000 + IST_OFFSET_MS);
+  return date.getUTCHours() * 60 + date.getUTCMinutes();
+}
+export function isRealDateCode(date: string): boolean {
+  if (!/^\d{8}$/.test(date)) return false;
+  const actual = new Date(`${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}T00:00:00Z`);
+  return Number.isFinite(actual.getTime()) && actual.toISOString().slice(0,10).replaceAll('-', '') === date;
 }

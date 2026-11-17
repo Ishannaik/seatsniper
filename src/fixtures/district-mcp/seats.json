@@ -1,0 +1,405 @@
+{
+  "tempTransId": "test-seat-map-session",
+  "show": {
+    "movie": "Ramayana",
+    "language": "Hindi",
+    "format": "2D",
+    "cinema": "Maxus Cinemas, Saki Naka",
+    "screen": "SCREEN 4",
+    "show_date_time": "2026-11-19T02:15:00.000Z"
+  },
+  "free_seating": false,
+  "max_tickets": 10,
+  "areas": [
+    {
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "name": "Sofa",
+      "price": 99,
+      "ticket_type": "402_Sofa",
+      "available_count": 19,
+      "total_count": 37
+    }
+  ],
+  "available_seats": 19,
+  "seats": [
+    {
+      "label": "A9",
+      "row": "A",
+      "number": "9",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "3",
+      "status": "available"
+    },
+    {
+      "label": "A8",
+      "row": "A",
+      "number": "8",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "4",
+      "status": "available"
+    },
+    {
+      "label": "A7",
+      "row": "A",
+      "number": "7",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "5",
+      "status": "available"
+    },
+    {
+      "label": "A6",
+      "row": "A",
+      "number": "6",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "6",
+      "status": "available"
+    },
+    {
+      "label": "A4",
+      "row": "A",
+      "number": "4",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "8",
+      "status": "available"
+    },
+    {
+      "label": "A3",
+      "row": "A",
+      "number": "3",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "9",
+      "status": "available"
+    },
+    {
+      "label": "A2",
+      "row": "A",
+      "number": "2",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "10",
+      "status": "available"
+    },
+    {
+      "label": "A1",
+      "row": "A",
+      "number": "1",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "11",
+      "status": "available"
+    },
+    {
+      "label": "B8",
+      "row": "B",
+      "number": "8",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "2",
+      "grid_seat_number": "3",
+      "status": "available"
+    },
+    {
+      "label": "B7",
+      "row": "B",
+      "number": "7",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "2",
+      "grid_seat_number": "4",
+      "status": "available"
+    },
+    {
+      "label": "B6",
+      "row": "B",
+      "number": "6",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "2",
+      "grid_seat_number": "5",
+      "status": "available"
+    },
+    {
+      "label": "B5",
+      "row": "B",
+      "number": "5",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "2",
+      "grid_seat_number": "6",
+      "status": "available"
+    },
+    {
+      "label": "B4",
+      "row": "B",
+      "number": "4",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "2",
+      "grid_seat_number": "9",
+      "status": "available"
+    },
+    {
+      "label": "B2",
+      "row": "B",
+      "number": "2",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "2",
+      "grid_seat_number": "11",
+      "status": "available"
+    },
+    {
+      "label": "B1",
+      "row": "B",
+      "number": "1",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "2",
+      "grid_seat_number": "12",
+      "status": "available"
+    },
+    {
+      "label": "C9",
+      "row": "C",
+      "number": "9",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "4",
+      "status": "available"
+    },
+    {
+      "label": "C8",
+      "row": "C",
+      "number": "8",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "5",
+      "status": "available"
+    },
+    {
+      "label": "C7",
+      "row": "C",
+      "number": "7",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "6",
+      "status": "available"
+    },
+    {
+      "label": "C6",
+      "row": "C",
+      "number": "6",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "7",
+      "status": "available"
+    },
+    {
+      "label": "A5",
+      "row": "A",
+      "number": "5",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "1",
+      "grid_seat_number": "7",
+      "status": "sold"
+    },
+    {
+      "label": "B3",
+      "row": "B",
+      "number": "3",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "2",
+      "grid_seat_number": "10",
+      "status": "sold"
+    },
+    {
+      "label": "C10",
+      "row": "C",
+      "number": "10",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "3",
+      "status": "sold"
+    },
+    {
+      "label": "C5",
+      "row": "C",
+      "number": "5",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "8",
+      "status": "sold"
+    },
+    {
+      "label": "C4",
+      "row": "C",
+      "number": "4",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "9",
+      "status": "sold"
+    },
+    {
+      "label": "C3",
+      "row": "C",
+      "number": "3",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "10",
+      "status": "sold"
+    },
+    {
+      "label": "C2",
+      "row": "C",
+      "number": "2",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "11",
+      "status": "sold"
+    },
+    {
+      "label": "C1",
+      "row": "C",
+      "number": "1",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "4",
+      "grid_seat_number": "12",
+      "status": "sold"
+    },
+    {
+      "label": "D10",
+      "row": "D",
+      "number": "10",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "3",
+      "status": "sold"
+    },
+    {
+      "label": "D9",
+      "row": "D",
+      "number": "9",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "4",
+      "status": "sold"
+    },
+    {
+      "label": "D8",
+      "row": "D",
+      "number": "8",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "5",
+      "status": "sold"
+    },
+    {
+      "label": "D7",
+      "row": "D",
+      "number": "7",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "6",
+      "status": "sold"
+    },
+    {
+      "label": "D6",
+      "row": "D",
+      "number": "6",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "7",
+      "status": "sold"
+    },
+    {
+      "label": "D5",
+      "row": "D",
+      "number": "5",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "8",
+      "status": "sold"
+    },
+    {
+      "label": "D4",
+      "row": "D",
+      "number": "4",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "9",
+      "status": "sold"
+    },
+    {
+      "label": "D3",
+      "row": "D",
+      "number": "3",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "10",
+      "status": "sold"
+    },
+    {
+      "label": "D2",
+      "row": "D",
+      "number": "2",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "11",
+      "status": "sold"
+    },
+    {
+      "label": "D1",
+      "row": "D",
+      "number": "1",
+      "area_code": "402_Sofa",
+      "area_num": "1",
+      "grid_row_id": "5",
+      "grid_seat_number": "12",
+      "status": "sold"
+    }
+  ],
+  "seat_status_legend": {
+    "available": "Free to book.",
+    "wheelchair": "Bookable, but reserved for wheelchair users; pick only if the user needs it.",
+    "wheelchair_companion": "Bookable, but reserved for companions of wheelchair users.",
+    "sold": "Already booked or held by someone else; cannot be booked.",
+    "blocked": "Kept empty by the cinema (spacing); cannot be booked.",
+    "unavailable": "Cannot be booked."
+  }
+}

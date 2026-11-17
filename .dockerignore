@@ -15,3 +15,8 @@ CLAUDE.md
 AGENTS.md
 Dockerfile
 docker-compose.yml
+
+.runtime/
+.env.*
+!.env.example
+*.command
