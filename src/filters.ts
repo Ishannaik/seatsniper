@@ -62,8 +62,12 @@ export function filterSummary(w: {
   theatre_filter?: string | null;
   after_filter?: string | null;
   before_filter?: string | null;
+  seat_count?: number | null;
+  seat_budget?: number | null;
 }): string | null {
   const parts: string[] = [];
+  if (w.seat_count != null) parts.push(`${w.seat_count} seats in one category (adjacency unchecked)`);
+  if (w.seat_budget != null) parts.push(`up to ₹${w.seat_budget}/seat before fees`);
   if (w.format_filter) parts.push(w.format_filter.split(",").join(" · "));
   if (w.theatre_filter) parts.push(w.theatre_filter.split(",").join(" · "));
   if (w.day_filter) parts.push(w.day_filter.split(",").map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(", "));

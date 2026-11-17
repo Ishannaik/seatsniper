@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 
 export type Watch = {
   id: number;
+  provider: "bms" | "district";
   user_id: string;
   channel_id: string;
   city: string;
@@ -19,6 +20,8 @@ export type Watch = {
   after_filter: string | null;
   before_filter: string | null;
   theatre_filter: string | null;
+  seat_count?: number | null;
+  seat_budget?: number | null;
 };
 
 const db = new Database(process.env.DB_PATH ?? "seatsniper.db", { create: true });
@@ -66,18 +69,36 @@ try { db.exec("ALTER TABLE watches ADD COLUMN after_filter TEXT"); } catch { /* 
 try { db.exec("ALTER TABLE watches ADD COLUMN before_filter TEXT"); } catch { /* already exists */ }
 try { db.exec("ALTER TABLE watches ADD COLUMN theatre_filter TEXT"); } catch { /* already exists */ }
 
+// Preserve existing IDs and notification ledgers while making provider/city part of identity.
+const schema = (db.query("SELECT sql FROM sqlite_master WHERE name = 'watches'").get() as { sql: string }).sql;
+if (!schema.includes("provider")) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.transaction(() => {
+      db.exec(schema.replace(/CREATE TABLE watches/i, "CREATE TABLE watches_provider_migration")
+        .replace("UNIQUE (user_id, event_code, date)", "provider TEXT NOT NULL DEFAULT 'bms' CHECK(provider IN ('bms', 'district')), UNIQUE (user_id, provider, city, event_code, date)"));
+      db.exec("INSERT INTO watches_provider_migration SELECT *, 'bms' FROM watches");
+      db.exec("DROP TABLE watches");
+      db.exec("ALTER TABLE watches_provider_migration RENAME TO watches");
+    })();
+  } finally { db.exec("PRAGMA foreign_keys = ON"); }
+}
+
+try { db.exec("ALTER TABLE watches ADD COLUMN seat_count INTEGER"); } catch { /* already exists */ }
+try { db.exec("ALTER TABLE watches ADD COLUMN seat_budget REAL"); } catch { /* already exists */ }
+
 const now = () => Math.floor(Date.now() / 1000);
 
 export const MAX_WATCHES_PER_USER = 5;
 
-export function addWatch(w: Omit<Watch, "id" | "fail_count" | "last_ok_at" | "last_error" | "created_at" | "format_filter" | "day_filter" | "after_filter" | "before_filter" | "theatre_filter"> & { format_filter?: string | null; day_filter?: string | null; after_filter?: string | null; before_filter?: string | null; theatre_filter?: string | null }): number | null {
+export function addWatch(w: Omit<Watch, "provider" | "id" | "fail_count" | "last_ok_at" | "last_error" | "created_at" | "format_filter" | "day_filter" | "after_filter" | "before_filter" | "theatre_filter"> & { provider?: "bms" | "district"; format_filter?: string | null; day_filter?: string | null; after_filter?: string | null; before_filter?: string | null; theatre_filter?: string | null }): number | null {
   try {
     const r = db
       .query(
-        `INSERT INTO watches (user_id, channel_id, city, slug, event_code, date, title, created_at, format_filter, day_filter, after_filter, before_filter, theatre_filter)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        `INSERT INTO watches (user_id, channel_id, city, slug, event_code, date, title, created_at, format_filter, day_filter, after_filter, before_filter, theatre_filter, provider, seat_count, seat_budget)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       )
-      .get(w.user_id, w.channel_id, w.city, w.slug, w.event_code, w.date, w.title, now(), w.format_filter ?? null, w.day_filter ?? null, w.after_filter ?? null, w.before_filter ?? null, w.theatre_filter ?? null) as { id: number };
+      .get(w.user_id, w.channel_id, w.city, w.slug, w.event_code, w.date, w.title, now(), w.format_filter ?? null, w.day_filter ?? null, w.after_filter ?? null, w.before_filter ?? null, w.theatre_filter ?? null, w.provider ?? "bms", w.seat_count ?? null, w.seat_budget ?? null) as { id: number };
     return r.id;
   } catch {
     return null; // UNIQUE violation == already watching this

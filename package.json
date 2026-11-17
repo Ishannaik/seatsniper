@@ -18,6 +18,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@discordjs/voice": "0.19.2",
     "discord.js": "^14.27.0",
     "node-tls-client": "^2.1.0"
   },

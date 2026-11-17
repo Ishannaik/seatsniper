@@ -317,3 +317,29 @@ it.**
 <p align="center">
   <sub>Observes and notifies only. Never buys tickets. Made for the Friday 9 AM rush.</sub>
 </p>
+
+
+## District support and private Discord DM watches
+
+SeatSniper now includes District movie and event monitoring alongside BookMyShow,
+with provider-aware persistence, filtering and explicit error handling. The
+optional Discord DM entry point lets each user manage private movie watches:
+
+```text
+watch <movie link> date:2026-12-18 time:18:30 theatre:"Oberoi Mall" format:PXL
+list
+stop 1
+stop all
+help
+```
+
+Each account gets its own filters, five-watch limit, persistent state and private
+alerts. A matching-show alert completes that watch. Times are IST. Date is
+required unless in the URL; time, theatre and format are optional. Checks run
+every 30 seconds with automatic backoff. Watch commands do not hold or pay.
+
+See [setup and privacy details](docs/discord-dm-watches.md) to run the optional
+`src/doomsday-cloud.ts` entry point instead of the original slash-command bot.
+Legacy hard-coded monitoring is disabled by default. Optional District booking
+and voice integrations remain restricted to the configured owner and require
+separate confirmations for booking actions. Never share tokens or runtime state.

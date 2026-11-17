@@ -78,6 +78,8 @@ export function resolveClientIdentifier(profile: string = resolveTlsProfile()): 
 }
 
 export type Show = {
+  bookingUrl?: string;
+  ticketCategories?: { name: string; available: number; price: number }[];
   sessionId: string;
   availStatus: string;
   showDateCode: string; // YYYYMMDD
@@ -99,6 +101,7 @@ export function istToEpoch(showDateTime: string): number {
 }
 
 export type Target = {
+  provider?: "bms" | "district";
   city: string; // "mumbai"
   slug: string; // "the-odyssey"
   eventCode: string; // "ET00480917"
@@ -106,15 +109,8 @@ export type Target = {
 };
 
 /** Anything that is not a confident, parsed answer. Never swallowed into `[]`. */
-export class BmsError extends Error {
-  constructor(
-    readonly kind: "network" | "blocked" | "unparseable" | "bad_url" | "not_found",
-    message: string,
-  ) {
-    super(message);
-    this.name = "BmsError";
-  }
-}
+import { BmsError } from "./provider-error.ts";
+export { BmsError } from "./provider-error.ts";
 
 let session: any = null;
 

@@ -1,11 +1,15 @@
 /** SeatSniper — paste a BookMyShow link, get a DM when that date opens. */
 import { Client, GatewayIntentBits, MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+import { handleDistrictBooking } from "./district-booking-discord.ts";
+import { matchesBookingPreferences, validateBookingPreferences, type BookingPreferences } from "./booking-preferences.ts";
 import * as msg from "./messages.ts";
 import {
-  initBms, closeBms, fetchShowtimes, fetchShowtimesCached, fetchBookableDates, bookableDatesCached, beginCycle,
+  isDistrictEvent, providerName, fetchShowtimes, fetchShowtimesCached, fetchBookableDates, bookableDatesCached, beginCycle,
   coalescedCount, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError, PROBE_DATE,
   type FormatChip, type Show, type Target,
-} from "./bms.ts";
+} from "./providers.ts";
+import { fetchDistrictEvent } from "./district-events.ts";
+import { initBms, closeBms } from "./bms.ts";
 import {
   addWatch, listWatches, allWatches, countWatches, removeWatch, markOk, markFail,
   seenDates, recordSeenDates, seenVenues, recordSeenVenues, shouldSilentSeedVenues,
@@ -22,6 +26,7 @@ const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) throw new Error("DISCORD_TOKEN missing — copy .env.example to .env");
 
 const POLL_MS = Number(process.env.POLL_INTERVAL_SEC ?? 600) * 1000;
+if (!Number.isFinite(POLL_MS) || POLL_MS < 1000) throw new Error("POLL_INTERVAL_SEC must be at least 1 second");
 
 const STAGGER = staggerBounds();
 
@@ -34,7 +39,8 @@ function normaliseDate(input: string): string {
   const d = input.trim().replace(/[-/]/g, "");
   if (!/^\d{8}$/.test(d)) throw new BmsError("bad_url", `Date must look like 2026-07-30, got "${input}"`);
   const [y, m, day] = [+d.slice(0, 4), +d.slice(4, 6), +d.slice(6, 8)];
-  if (m < 1 || m > 12 || day < 1 || day > 31) {
+  const actual = new Date(Date.UTC(y, m - 1, day));
+  if (actual.getUTCFullYear() !== y || actual.getUTCMonth() !== m - 1 || actual.getUTCDate() !== day) {
     throw new BmsError("bad_url", `"${input}" isn't a real date.`);
   }
   return d;
@@ -49,7 +55,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 // events, not under the parent event's `attributes`. A filtered watch must check
 // the parent AND every matching child event before deciding a date has shows.
 
-type MovieRef = Pick<Watch, "city" | "slug" | "event_code">;
+type MovieRef = Pick<Watch, "provider" | "city" | "slug" | "event_code">;
 
 function chipTarget(chip: FormatChip, city: string, date: string): Target {
   return { city, slug: chip.slug, eventCode: chip.eventCode, date };
@@ -79,7 +85,7 @@ async function matchingShows(
   filter: string,
   chips: FormatChip[],
 ): Promise<{ shows: Show[]; formats: string[] }> {
-  const parent = { city: movie.city, slug: movie.slug, eventCode: movie.event_code, date };
+  const parent = { provider: movie.provider, city: movie.city, slug: movie.slug, eventCode: movie.event_code, date };
   const shows = showsOnDate((await fetchShowtimesCached(parent)).shows, date)
     .filter((s) => matchesFormat(s.attributes, filter));
 
@@ -105,7 +111,9 @@ function chipsMatchingFilter(chips: FormatChip[], filter: string): FormatChip[] 
 async function cmdWatch(i: ChatInputCommandInteraction) {
   await i.deferReply({ flags: MessageFlags.Ephemeral });
 
-  let target;
+  const bookingPrefs: BookingPreferences = { seat_count: i.options.getInteger("seats"), seat_budget: i.options.getNumber("budget") };
+  try { validateBookingPreferences(bookingPrefs); } catch (e) { return void i.editReply(`❌ ${(e as Error).message}`); }
+  let target: Target;
   const formatFilter = normaliseFormats(i.options.getString("format"));
 
   // Reject an unreadable filter instead of silently dropping it: a watch that quietly
@@ -141,19 +149,24 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   const theatreFilter = normaliseTheatres(i.options.getString("theatre"));
   try {
     const parsed = parseWatchUrl(i.options.getString("link", true));
+    if ((bookingPrefs.seat_count != null || bookingPrefs.seat_budget != null) && (parsed.provider !== "district" || isDistrictEvent(parsed))) return void i.editReply("Seat count and budget alerts currently support District movies only; public category data is required.");
+    if (isDistrictEvent(parsed)) {
+      if (formatFilter) return void i.editReply("District events don't have cinema formats. Leave format empty; day, time and venue filters are supported.");
+      parsed.city = (await fetchDistrictEvent(parsed)).city;
+    }
     const dateOpt = i.options.getString("date")?.trim();
     // "any" (or a link with no date and no date option) subscribes to the movie:
     // ping me every time a NEW date unlocks, rather than watching one date.
     const wantsAny = dateOpt ? /^(any|all|every|new)$/i.test(dateOpt) : !parsed.date;
-    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter, afterFilter, beforeFilter, theatreFilter));
+    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter, afterFilter, beforeFilter, theatreFilter, bookingPrefs));
 
-    const date = dateOpt ? normaliseDate(dateOpt) : parsed.date!;
+    const date = normaliseDate(dateOpt || parsed.date!);
     if (date < todayIST()) {
       return void i.editReply(
         `❌ ${prettyDate(date)} has already passed — a watch for it could never fire.`,
       );
     }
-    target = { city: parsed.city, slug: parsed.slug, eventCode: parsed.eventCode, date };
+    target = { provider: parsed.provider, city: parsed.city, slug: parsed.slug, eventCode: parsed.eventCode, date };
   } catch (e) {
     return void i.editReply(`❌ ${(e as Error).message}`);
   }
@@ -168,7 +181,11 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   try {
     const res = await fetchShowtimes(target);
     title = res.title; // BookMyShow's own name for it, not a guess from the slug
-    open = showsOnDate(res.shows, target.date);
+    open = showsOnDate(res.shows, target.date).filter((sh) =>
+      (!formatFilter || matchesFormat(sh.attributes, formatFilter)) &&
+      (!dayFilter || matchesDay(sh.showDateCode, dayFilter)) &&
+      (!theatreFilter || matchesTheatre(sh.venueName, sh.venueCode, theatreFilter)) &&
+      matchesTimeFilter(sh.epoch, afterMinutes, beforeMinutes) && matchesBookingPreferences(sh, bookingPrefs));
   } catch (e) {
     const err = e as BmsError;
     if (err.kind === "not_found") {
@@ -178,7 +195,7 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
       );
     }
     return void i.editReply(
-      `⚠️ Can't reach BookMyShow right now, so I won't save a watch I can't check.\n\`${err.message}\``,
+      `⚠️ Can't reach ${providerName(target)} right now, so I won't save a watch I can't check.\n\`${err.message}\``,
     );
   }
 
@@ -189,7 +206,7 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   }
 
   const id = addWatch({
-    user_id: i.user.id, channel_id: i.channelId, city: target.city, slug: target.slug,
+    user_id: i.user.id, channel_id: i.channelId, ...bookingPrefs, provider: target.provider, city: target.city, slug: target.slug,
     event_code: target.eventCode, date: target.date, title,
     format_filter: formatFilter, day_filter: dayFilter,
     after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter,
@@ -197,7 +214,7 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
   if (id === null) return void i.editReply("You're already watching that movie and date. `/list` to see it.");
 
   await i.editReply(
-    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter }) }),
+    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter, ...bookingPrefs }) }),
   );
 }
 
@@ -210,12 +227,13 @@ async function cmdWatch(i: ChatInputCommandInteraction) {
  */
 async function subscribeToMovie(
   i: ChatInputCommandInteraction,
-  parsed: { city: string; slug: string; eventCode: string },
+  parsed: { provider?: "bms" | "district"; city: string; slug: string; eventCode: string },
   formatFilter: string | null,
   dayFilter: string | null,
   afterFilter: string | null,
   beforeFilter: string | null,
   theatreFilter: string | null,
+  bookingPrefs: BookingPreferences,
 ) {
   if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
     return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
@@ -232,7 +250,7 @@ async function subscribeToMovie(
       );
     }
     return void i.editReply(
-      `⚠️ Can't reach BookMyShow right now, so I won't save a watch I can't check.\n\`${err.message}\``,
+      `⚠️ Can't reach ${providerName(parsed)} right now, so I won't save a watch I can't check.\n\`${err.message}\``,
     );
   }
 
@@ -242,19 +260,24 @@ async function subscribeToMovie(
   // from the poll cycle cache.
   let baseline: string[] = dates;
   let matchingNow: string[] = [];
-  if (formatFilter) {
+  if (parsed.provider === "district" || formatFilter || dayFilter || theatreFilter || afterFilter || beforeFilter) {
     const matched: string[] = [];
     for (const d of dates) {
-      const target = { city: parsed.city, slug: parsed.slug, eventCode: parsed.eventCode, date: d };
+      const target = { provider: parsed.provider, city: parsed.city, slug: parsed.slug, eventCode: parsed.eventCode, date: d };
       try {
         const shows = showsOnDate((await fetchShowtimes(target)).shows, d)
-          .filter((s) => matchesFormat(s.attributes, formatFilter!));
-        for (const chip of chipsMatchingFilter(chips, formatFilter)) {
+          .filter((s) => (!formatFilter || matchesFormat(s.attributes, formatFilter)) &&
+            (!dayFilter || matchesDay(d, dayFilter)) &&
+            (!theatreFilter || matchesTheatre(s.venueName, s.venueCode, theatreFilter)) &&
+            matchesTimeFilter(s.epoch, parseTimeFilter(afterFilter ?? ""), parseTimeFilter(beforeFilter ?? "")));
+        for (const chip of (formatFilter ? chipsMatchingFilter(chips, formatFilter) : [])) {
           const child = showsOnDate((await fetchShowtimes(chipTarget(chip, parsed.city, d))).shows, d)
             .filter((s) => matchesFormat(s.attributes, formatFilter!));
           shows.push(...child);
         }
-        if (shows.length) matched.push(d);
+        if (shows.some((sh) => (!dayFilter || matchesDay(d, dayFilter)) &&
+            (!theatreFilter || matchesTheatre(sh.venueName, sh.venueCode, theatreFilter)) &&
+            matchesTimeFilter(sh.epoch, parseTimeFilter(afterFilter ?? ""), parseTimeFilter(beforeFilter ?? "")) && matchesBookingPreferences(sh, bookingPrefs))) matched.push(d);
       } catch (e) {
         // Uncheckable date at creation — treat as not-yet-matching so it stays armed.
         console.error(`[sub] format validation failed for ${d}:`, (e as Error).message);
@@ -265,7 +288,7 @@ async function subscribeToMovie(
   }
 
   const id = addWatch({
-    user_id: i.user.id, channel_id: i.channelId, city: parsed.city, slug: parsed.slug,
+    user_id: i.user.id, channel_id: i.channelId, ...bookingPrefs, provider: parsed.provider, city: parsed.city, slug: parsed.slug,
     event_code: parsed.eventCode, date: SUBSCRIPTION, title,
     format_filter: formatFilter, day_filter: dayFilter,
     after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter,
@@ -277,8 +300,9 @@ async function subscribeToMovie(
 
   await i.editReply(
     msg.armedForMovie({
-      title, city: parsed.city, openNow: formatFilter ? matchingNow : dates, everyMin: POLL_MS / 60000,
-      filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter }),
+      title, city: parsed.city, openNow: (parsed.provider === "district" || formatFilter || dayFilter || theatreFilter || afterFilter || beforeFilter) ? matchingNow : dates, everyMin: POLL_MS / 60000,
+      filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter, ...bookingPrefs }),
+      isEvent: isDistrictEvent(parsed),
       warning:
         formatFilter && !matchingNow.length
           ? `_No ${formatFilter} shows exist for this movie right now — I'll ping you the moment one appears._`
@@ -316,14 +340,14 @@ async function checkSubscription(w: Watch) {
   let chips: FormatChip[] = [];
   try {
     ({ dates, venues, chips } = await bookableDatesCached({
-      city: w.city, slug: w.slug, eventCode: w.event_code,
+      provider: w.provider, city: w.city, slug: w.slug, eventCode: w.event_code,
     }));
   } catch (e) {
     markFail(w.id, (e as Error).message);
     if (w.fail_count + 1 === 3) await dm(w, failEmbed(w, e as Error));
     return;
   }
-  markOk(w.id);
+  if (w.provider !== "district") markOk(w.id);
 
   // null venues = parse failed; skip cinema diff (don't treat as "no cinemas").
   //
@@ -338,13 +362,27 @@ async function checkSubscription(w: Watch) {
   // it costs no extra request and needs none of the coalescing above.
   let freshVenues: { code: string; name: string }[] = [];
   if (venues) {
-    if (shouldSilentSeedVenues(w.id)) {
+    if (!isDistrictEvent(w) && shouldSilentSeedVenues(w.id)) {
       recordSeenVenues(w.id, venues.map((v) => v.code));
     } else {
       const known = new Set(seenVenues(w.id));
       freshVenues = venues.filter((v) => !known.has(v.code));
       if (w.theatre_filter) freshVenues = freshVenues.filter((v) => matchesTheatre(v.name, v.code, w.theatre_filter!));
     }
+  }
+
+  if (w.provider === "district" && freshVenues.length) {
+    const qualified = new Set<string>();
+    for (const d of dates) {
+      if (w.day_filter && !matchesDay(d, w.day_filter)) continue;
+      const shows = showsOnDate((await fetchShowtimesCached({ provider: w.provider, city: w.city, slug: w.slug, eventCode: w.event_code, date: d })).shows, d);
+      for (const sh of shows) {
+        if ((!w.format_filter || matchesFormat(sh.attributes, w.format_filter)) &&
+            (!w.theatre_filter || matchesTheatre(sh.venueName, sh.venueCode, w.theatre_filter)) &&
+            matchesTimeFilter(sh.epoch, parseTimeFilter(w.after_filter ?? ""), parseTimeFilter(w.before_filter ?? "")) && matchesBookingPreferences(sh, w)) qualified.add(sh.venueCode);
+      }
+    }
+    freshVenues = freshVenues.filter((v) => qualified.has(v.code));
   }
 
   const knownDates = new Set(seenDates(w.id));
@@ -358,10 +396,11 @@ async function checkSubscription(w: Watch) {
   // Costs an extra fetchShowtimes per fresh date — spent only when one of those filters
   // is set, and coalesced so N watches on the same movie share the request. A date alone
   // says nothing about start times or venues, so all three share a single pass.
+  const matchedShows: Show[] = [];
   let matchedFormats: string[] = [];
   const afterMinutes = w.after_filter ? parseTimeFilter(w.after_filter) : null;
   const beforeMinutes = w.before_filter ? parseTimeFilter(w.before_filter) : null;
-  const needsShowtimes = Boolean(w.format_filter) || Boolean(w.theatre_filter) || afterMinutes !== null || beforeMinutes !== null;
+  const needsShowtimes = w.provider === "district" || Boolean(w.format_filter) || Boolean(w.theatre_filter) || afterMinutes !== null || beforeMinutes !== null;
   if (needsShowtimes && freshDates.length) {
     const kept: string[] = [];
     for (const d of freshDates) {
@@ -370,15 +409,16 @@ async function checkSubscription(w: Watch) {
         if (w.format_filter) {
           shows = (await matchingShows(w, d, w.format_filter, chips)).shows;
         } else {
-          shows = showsOnDate((await fetchShowtimesCached({ city: w.city, slug: w.slug, eventCode: w.event_code, date: d })).shows, d);
+          shows = showsOnDate((await fetchShowtimesCached({ provider: w.provider, city: w.city, slug: w.slug, eventCode: w.event_code, date: d })).shows, d);
         }
         const hits = shows.filter(
           (sh) =>
             (!w.theatre_filter || matchesTheatre(sh.venueName, sh.venueCode, w.theatre_filter)) &&
-            matchesTimeFilter(sh.epoch, afterMinutes, beforeMinutes),
+            matchesTimeFilter(sh.epoch, afterMinutes, beforeMinutes) && matchesBookingPreferences(sh, w),
         );
         if (hits.length) {
           kept.push(d);
+          matchedShows.push(...hits);
           if (w.format_filter) {
             for (const h of hits) if (h.attributes && !matchedFormats.includes(h.attributes)) matchedFormats.push(h.attributes);
           }
@@ -387,16 +427,18 @@ async function checkSubscription(w: Watch) {
         }
       } catch (e) {
         // Uncheckable date — log it and retry next poll rather than silently skipping.
+        if (w.provider === "district") throw e;
         console.error(`[watch ${w.id}] format check failed for ${d}:`, (e as Error).message);
       }
     }
     freshDates = kept;
   }
 
+  if (w.provider === "district") markOk(w.id);
   if (!freshDates.length && !freshVenues.length) return;
 
   const url = showtimesUrl({
-    city: w.city,
+    provider: w.provider, city: w.city,
     slug: w.slug,
     eventCode: w.event_code,
     date: freshDates[0] ?? dates[0] ?? PROBE_DATE,
@@ -406,7 +448,7 @@ async function checkSubscription(w: Watch) {
   // would lose the alert permanently if delivery failed.
   const outcome = await dm(w, msg.subscriptionAlert({
     title: w.title, city: w.city, dates: freshDates, venues: freshVenues, url,
-    filters: filterSummary(w), matchedFormats,
+    filters: filterSummary(w), matchedFormats, shows: matchedShows, isEvent: isDistrictEvent(w),
   }));
   if (outcome !== "failed") {
     if (freshDates.length) recordSeenDates(w.id, freshDates);
@@ -417,8 +459,15 @@ async function checkSubscription(w: Watch) {
 }
 
 async function checkWatch(w: Watch) {
-  if (isSubscription(w)) return void (await checkSubscription(w));
-  const target = { city: w.city, slug: w.slug, eventCode: w.event_code, date: w.date };
+  if (isSubscription(w)) {
+    try { await checkSubscription(w); }
+    catch (e) {
+      markFail(w.id, (e as Error).message);
+      if (w.fail_count + 1 === 3) await dm(w, failEmbed(w, e as Error));
+    }
+    return;
+  }
+  const target = { provider: w.provider, city: w.city, slug: w.slug, eventCode: w.event_code, date: w.date };
   let open;
   let chips: FormatChip[] = [];
   try {
@@ -461,6 +510,7 @@ async function checkWatch(w: Watch) {
       matchesTimeFilter(s.epoch, parseTimeFilter(w.after_filter ?? ""), parseTimeFilter(w.before_filter ?? "")));
   }
   if (w.theatre_filter) filtered = filtered.filter((s) => matchesTheatre(s.venueName, s.venueCode, w.theatre_filter!));
+  filtered = filtered.filter((sh) => matchesBookingPreferences(sh, w));
   if (!filtered.length) return; // shows exist but none match — stay silent, keep watching
 
   // Same rule: a watch is only "done its job" once the user was actually told.
@@ -472,7 +522,7 @@ async function checkWatch(w: Watch) {
   else console.error(`[watch ${w.id}] undelivered, keeping watch alive to retry`);
 }
 
-const failEmbed = (w: Watch, e: Error) => msg.cannotRead({ title: w.title, error: e.message });
+const failEmbed = (w: Watch, e: Error) => msg.cannotRead({ title: w.title, error: e.message, provider: providerName(w) });
 
 /** Where a notification actually landed. */
 type DeliveryOutcome = "dm" | "channel_fallback" | "failed";
@@ -587,6 +637,7 @@ async function poll() {
 // ---------------------------------------------------------------- wire-up
 
 client.on("interactionCreate", async (i) => {
+  if (await handleDistrictBooking(i)) return;
   // Autocomplete for /watch format + days options.
   if (i.isAutocomplete()) {
     const focused = i.options.getFocused(true);
@@ -613,8 +664,11 @@ client.on("interactionCreate", async (i) => {
 
 client.once("clientReady", (c) => {
   console.log(`SeatSniper online as ${c.user.tag}`);
-  poll().catch(console.error);
-  setInterval(() => void poll().catch(console.error), POLL_MS);
+  const tick = async () => {
+    try { await poll(); } catch (e) { console.error(e); }
+    setTimeout(() => void tick(), POLL_MS);
+  };
+  void tick();
 });
 
 await initBms();
