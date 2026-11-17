@@ -54,3 +54,15 @@ Legacy hard-coded movie monitoring is disabled by default and runs only when
 `LEGACY_DOOMSDAY_ENABLED=true`. Optional District `/book`, voice tests, reminders,
 login, holds and payment controls stay restricted to the configured owner; this
 change does not share the owner's District session with other Discord users.
+
+## Screen formats
+
+Use `format:PXL`, `format:IMAX`, `format:4DX`, `format:ScreenX`, `format:3D`
+or `format:2D`. Other suggestions include MX4D, ICE, Dolby Atmos, Dolby Cinema,
+RPX and VIP. Slash-command autocomplete includes PXL and IMAX dimensional options.
+
+`format:PXL` accepts both PXL 2D and 3D. Use `format:"PXL 3D"` to require
+PXL 3D, or `format:"IMAX 3D"` to require IMAX 3D. `format:PXL,IMAX` accepts
+either format, without ranking one over the other. With no format option, any
+format can match. These filters use the provider's reported format metadata;
+a missing or unrecognised label cannot be treated as a confirmed match.

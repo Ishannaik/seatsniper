@@ -23,3 +23,10 @@ test('stopping a watch while its fetch is in flight prevents its alert',async()=
 
 test('registered slash stop/list/help map to real DM management, never generic booking fallback',async()=>{const options={getString:()=>null,getInteger:(name:string)=>name==='id'?12:null,getNumber:()=>null};expect(dmSlashText('stop',options)).toBe('stop 12');expect(dmSlashText('list',options)).toBe('list');expect(dmSlashText('help',options)).toBe('help');const f=setup();try{expect(await f.manager.command(dmSlashText('stop',options))).toContain('No active watch');expect(await f.manager.command(dmSlashText('help',options))).toContain('BookMyShow and District')}finally{f.clean()}});
 test('slash watch retains quoted options and rejects unsupported filters instead of ignoring them',()=>{const values:any={link:bms,date:'2026-12-17',theatre:'Oberoi Mall',after:'18:00'};const options={getString:(k:string)=>values[k]??null,getInteger:()=>null,getNumber:()=>null};expect(parseDmWatch(dmSlashText('watch',options),now).theatre).toBe('Oberoi Mall');values.days='fri';expect(()=>dmSlashText('watch',options)).toThrow('weekday')});
+
+test('DM format alternatives and quoted dimensional formats filter precisely',()=>{
+ const either=parseDmWatch(message.replace('format:pxl','format:PXL,IMAX'),now);
+ expect(filterDmShows(either,[show,{...show,attributes:'IMAX 2D'},{...show,attributes:'Standard 2D'}],now)).toHaveLength(2);
+ const only3d=parseDmWatch(message.replace('format:pxl','format:"PXL 3D"'),now);
+ expect(filterDmShows(only3d,[show,{...show,attributes:'PXL 2D'},{...show,attributes:'IMAX 3D'}],now)).toHaveLength(1);
+});

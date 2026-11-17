@@ -6,6 +6,7 @@ import type {DiscordVoiceAlerts} from './discord-voice-alerts.ts';
 import {DiscordReminders,reminderStopId,createReminderSender} from './discord-reminders.ts';
 import {createPvrPoller} from './pvr-monitor.ts';
 import {dmWatchHelp,dmSlashText} from './dm-watches.ts';
+import {formatSuggestions} from './filters.ts';
 import {UserDmWatches} from './user-dm-watches.ts';
 const dmWatches=new UserDmWatches();
 const legacyDoomsday=process.env.LEGACY_DOOMSDAY_ENABLED==='true';
@@ -45,7 +46,7 @@ client.on('interactionCreate',async i=>{
    await i.deferReply({flags:MessageFlags.Ephemeral});
    try{await i.editReply({content:!voice?'Voice alerts are not configured yet.':i.customId==='seatsniper:voice:stop'?'Ringing stopped. Seat holds and payments still need their separate confirmations.':i.customId==='seatsniper:voice:ringtest'?await voice.testRing():await voice.test(),allowedMentions:{parse:[]}})}catch{await i.editReply({content:'Voice test could not connect. Keep the configured channel joined with audio on. Discord text alerts continue.',allowedMentions:{parse:[]}})}return;
   }
-  if(i.isAutocomplete()){await i.respond([]);return;}
+  if(i.isAutocomplete()){const focused=i.options.getFocused(true);await i.respond(i.commandName==='watch'&&focused.name==='format'?formatSuggestions(String(focused.value)):[]);return;}
   if(i.isChatInputCommand()&&['watch','list','stop','help'].includes(i.commandName)){
    if(i.guildId){await i.reply({content:'Manage your watches in a private DM with this bot.',flags:MessageFlags.Ephemeral});return}
    await i.deferReply({flags:MessageFlags.Ephemeral});

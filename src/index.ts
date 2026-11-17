@@ -17,7 +17,7 @@ import {
 } from "./db.ts";
 import { parseTimeFilter, matchesTimeFilter } from "./time-filter.ts";
 import {
-  FORMAT_CHOICES, DAY_CHOICES, normaliseFormats, normaliseDays, matchesFormat,
+  FORMAT_CHOICES, DAY_CHOICES, formatSuggestions, normaliseFormats, normaliseDays, matchesFormat,
   matchesDay, matchesTheatre, normaliseTheatres, filterSummary,
 } from "./filters.ts";
 import { staggerBounds, staggerDelayMs } from "./stagger.ts";
@@ -647,7 +647,7 @@ client.on("interactionCreate", async (i) => {
       .filter((c) => c.toLowerCase().includes(val))
       .slice(0, 25)
       .map((c) => ({ name: c, value: c }));
-    return void i.respond(matches).catch(() => {});
+    return void i.respond(focused.name === "format" ? formatSuggestions(String(focused.value)) : matches).catch(() => {});
   }
   if (!i.isChatInputCommand()) return;
   try {
