@@ -23,9 +23,10 @@ must be checked on the booking page. Watch commands do not hold seats or pay.
 ## Run
 
 Install Bun and dependencies as in the main README. Set `DISCORD_TOKEN` and
-`DISCORD_CLIENT_ID`, register commands with `bun run commands`, then start:
+`DISCORD_CLIENT_ID`, register the DM-specific command options, then start:
 
 ```sh
+BOT_RUNTIME=dm bun run commands
 bun src/doomsday-cloud.ts
 ```
 

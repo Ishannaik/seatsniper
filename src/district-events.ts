@@ -1,5 +1,6 @@
 /** Public District event reads. React Flight is parsed as data, never executed. */
-import { BmsError, type Show, type Target } from "./bms.ts";
+import { BmsError } from "./provider-error.ts";
+import type { Show, Target } from "./movie-model.ts";
 export const isDistrictEvent = (t: { provider?: string; eventCode?: string; event_code?: string }) => t.provider === "district" && (t.eventCode ?? t.event_code ?? "").startsWith("EV:");
 export const districtEventUrl = (t: Pick<Target, "slug">) => `https://www.district.in/events/${t.slug}-buy-tickets`;
 const bad = (s: string): never => { throw new BmsError("unparseable", `District event: ${s}`); };

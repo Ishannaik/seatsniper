@@ -57,3 +57,17 @@ test('legacy owner watches never migrate to another user and each user may watch
   expect(await manager.command(alice,'list')).toContain('#1');
  } finally {rmSync(dir,{recursive:true,force:true})}
 });
+
+test('users share public reads within a cycle and close the shared native session once',async()=>{
+ const {PublicMovieReader}=await import('./movie-reader.ts');
+ const dir=mkdtempSync(join(tmpdir(),'shared-private-reads-'));
+ let reads=0,starts=0,stops=0;
+ const reader=new PublicMovieReader(async()=>{reads++;return {title:'Movie',shows:[]}},async()=>({title:'Movie',dates:[],venues:[],chips:[]}),async()=>{starts++},async()=>{stops++});
+ const manager=new UserDmWatches(dir,alice,p=>new DmWatches(p,reader,()=>now));
+ try {
+  await manager.command(alice,watch);await manager.command(bob,watch);
+  const before=reads;await manager.step(async()=>{});
+  expect(reads-before).toBe(1);expect(starts).toBe(1);
+  await manager.close();expect(stops).toBe(1);
+ }finally{rmSync(dir,{recursive:true,force:true})}
+});

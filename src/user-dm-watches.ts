@@ -2,7 +2,8 @@
 import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DmWatches } from './dm-watches.ts';
-import type { Json } from './district-mcp.ts';
+import type { Json } from './json.ts';
+import { ReadCycle } from './read-cycle.ts';
 const validId = (id: string) => /^\d{17,20}$/.test(id);
 export class UserDmWatches {
   private managers = new Map<string, DmWatches>();
@@ -34,8 +35,9 @@ export class UserDmWatches {
     return manager.command(text);
   }
   async step(send: (userId: string, content: string, components?: Json[]) => Promise<unknown>) {
+    const cycle = new ReadCycle();
     for (const [userId, manager] of this.managers) {
-      try { await manager.step((content, components) => send(userId, content, components)); }
+      try { await manager.step((content, components) => send(userId, content, components), cycle); }
       catch { console.error('Private watch cycle failed; other users continue.'); }
     }
   }

@@ -1,6 +1,9 @@
+import { legacyMoviePolicy } from './legacy-movie-policy.ts';
 import { randomBytes } from "node:crypto";
-import { type Json, type ConnectionState, problem } from "./district-mcp.ts";
-import type { SeatSuggestion } from "./district-alerts.ts";
+import {problem} from './district-response.ts';
+import type {ConnectionState} from './district-state.ts';
+import type {Json} from './json.ts';
+import type {SeatSuggestion} from './seat-suggestion.ts';
 export type Caller = (name: string, args?: Json) => Promise<Json>;
 export type BookingReply = { text: string; confirmation?: string; confirmationKind?: "hold" | "payment"; actions?: {label:string; id:string}[] };
 export function verifyHeldSeats(before: Json, after: Json, labels: string[]): Json {
@@ -100,7 +103,7 @@ export class DistrictBooking {
     return this.hold(alert.seats);
   }
   private async alertData(alert: SeatSuggestion) {
-    assert([alert.movie,alert.cinema,alert.session].every(v=>/^\d+$/.test(v)) && /^\d{4}-\d{2}-\d{2}$/.test(alert.date) && Date.parse(alert.showDateTime)>Date.now() && alert.seats.length===3 && new Set(alert.seats).size===3 && Number.isFinite(alert.price) && alert.price>0 && alert.price<=1200, "Invalid or expired seat suggestion.");
+    assert([alert.movie,alert.cinema,alert.session].every(v=>/^\d+$/.test(v)) && /^\d{4}-\d{2}-\d{2}$/.test(alert.date) && Date.parse(alert.showDateTime)>Date.now() && alert.seats.length===legacyMoviePolicy.count && new Set(alert.seats).size===legacyMoviePolicy.count && Number.isFinite(alert.price) && alert.price>0 && alert.price<=legacyMoviePolicy.maximum, "Invalid or expired seat suggestion.");
     const data=checked(await this.call("execute",{operation:"consumer.cinema_showtimes",arguments:{cinema_id:alert.cinema,date:alert.date}}));
     const movie=data.movies?.find((m:Json)=>String(m.id)===alert.movie);
     const show=movie?.sessions?.find((s:Json)=>String(s.id)===alert.session);

@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, chmodSync, writeFileSync, readFileSync, renameSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConnectionState, Json } from './district-mcp.ts';
-export type SeatSuggestion = { movie:string; cinema:string; session:string; date:string; showDateTime:string; screen:string; language:string; format:string; seats:string[]; price:number };
+import type {ConnectionState} from './district-state.ts';
+import type {Json} from './json.ts';
+import type {SeatSuggestion} from './seat-suggestion.ts';
+export type {SeatSuggestion} from './seat-suggestion.ts';
 export type PreparedHold = { suggestion:SeatSuggestion; flow:Json; pending:Json; expires:number; renewalFor?:string };
 export class DistrictAlertStore {
  constructor(readonly directory=join(process.env.MONITOR_STATE_DIR??'.runtime/doomsday-monitor','book-now')){mkdirSync(directory,{recursive:true,mode:0o700});chmodSync(directory,0o700)}

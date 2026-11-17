@@ -1,4 +1,4 @@
-import type { Show } from "./bms.ts";
+import type { Show } from "./movie-model.ts";
 export type BookingPreferences = { seat_count?: number | null; seat_budget?: number | null };
 /** Counts are within one ticket category; they never imply seats are adjacent. */
 export function matchesBookingPreferences(show: Show, p: BookingPreferences): boolean {

@@ -89,7 +89,8 @@ try { db.exec("ALTER TABLE watches ADD COLUMN seat_budget REAL"); } catch { /* a
 
 const now = () => Math.floor(Date.now() / 1000);
 
-export const MAX_WATCHES_PER_USER = 5;
+import { MAX_WATCHES_PER_USER } from "./watch-policy.ts";
+export { MAX_WATCHES_PER_USER } from "./watch-policy.ts";
 
 export function addWatch(w: Omit<Watch, "provider" | "id" | "fail_count" | "last_ok_at" | "last_error" | "created_at" | "format_filter" | "day_filter" | "after_filter" | "before_filter" | "theatre_filter"> & { provider?: "bms" | "district"; format_filter?: string | null; day_filter?: string | null; after_filter?: string | null; before_filter?: string | null; theatre_filter?: string | null }): number | null {
   try {

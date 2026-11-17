@@ -15,6 +15,17 @@
  *    a field comparison, never a keyword or frequency heuristic.
  */
 import * as tls from "node-tls-client";
+import { ReadCycle } from "./read-cycle.ts";
+import type { Show, Target, FormatChip } from "./movie-model.ts";
+import { istToEpoch, prettyDate } from "./time-filter.ts";
+import { showsOnDate } from "./movie-model.ts";
+export type { Show, Target, FormatChip } from "./movie-model.ts";
+export { showsOnDate } from "./movie-model.ts";
+export { istToEpoch, prettyDate } from "./time-filter.ts";
+/** Does a show's format match the filter? Case-insensitive, space-insensitive
+ *  substring: "IMAX" catches "IMAX 3D"; "SCREENX" catches "3D SCREEN X".
+ *  Used both for show attributes and for matching format-selector chip titles. */
+export { matchesFormat } from "./filters.ts";
 
 // ponytail: pinned profile, but rotatable so an operator can react when
 // Cloudflare's scoring shifts without editing code and redeploying.
@@ -76,37 +87,6 @@ export function resolveClientIdentifier(profile: string = resolveTlsProfile()): 
   }
   return id;
 }
-
-export type Show = {
-  bookingUrl?: string;
-  ticketCategories?: { name: string; available: number; price: number }[];
-  sessionId: string;
-  availStatus: string;
-  showDateCode: string; // YYYYMMDD
-  showTime: string; // "06:40 AM"
-  attributes: string; // "IMAX", "" if none
-  /** Unix seconds. Lets Discord render the time in each reader's own locale. */
-  epoch: number;
-  venueCode: string;
-  venueName: string;
-};
-
-/** "202607280640" (IST wall clock) -> unix seconds. India is UTC+5:30, no DST. */
-export function istToEpoch(showDateTime: string): number {
-  const [y, mo, d, h, mi] = [
-    +showDateTime.slice(0, 4), +showDateTime.slice(4, 6), +showDateTime.slice(6, 8),
-    +showDateTime.slice(8, 10), +showDateTime.slice(10, 12),
-  ];
-  return Math.floor(Date.UTC(y!, mo! - 1, d!, h!, mi!) / 1000) - 5.5 * 3600;
-}
-
-export type Target = {
-  provider?: "bms" | "district";
-  city: string; // "mumbai"
-  slug: string; // "the-odyssey"
-  eventCode: string; // "ET00480917"
-  date: string; // YYYYMMDD
-};
 
 /** Anything that is not a confident, parsed answer. Never swallowed into `[]`. */
 import { BmsError } from "./provider-error.ts";
@@ -325,12 +305,6 @@ export function parseVenues(html: string): { code: string; name: string }[] {
  * event's `attributes`; they live on e.g. ET00502684. Format filters must resolve
  * these chips to know which child pages to check.
  */
-export type FormatChip = {
-  title: string;
-  eventCode: string;
-  slug: string; // the child event's URL slug, e.g. "spider-man-brand-new-day-3d-screen-x"
-};
-
 /**
  * Parse the format-selector chips off a buytickets page.
  *
@@ -352,14 +326,6 @@ export function parseFormatChips(html: string): FormatChip[] {
     }
   }
   return out;
-}
-
-/**
- * The availability test. A date is bookable iff BookMyShow actually rendered shows
- * FOR THAT DATE — not merely that the page loaded and had shows on it.
- */
-export function showsOnDate(shows: Show[], date: string): Show[] {
-  return shows.filter((s) => s.showDateCode === date);
 }
 
 /**
@@ -418,42 +384,16 @@ export async function fetchBookableDates(
 type BookableDates = { title: string; dates: string[]; venues: { code: string; name: string }[] | null; chips: FormatChip[] };
 type Showtimes = { title: string; shows: Show[] };
 
-let cycle = new Map<string, Promise<BookableDates>>();
-let showtimesCycle = new Map<string, Promise<Showtimes>>();
-let cycleHits = 0;
-
-export function beginCycle(): void {
-  cycle = new Map();
-  showtimesCycle = new Map();
-  cycleHits = 0;
-}
-
+let cycle = new ReadCycle();
+export function beginCycle(): void { cycle = new ReadCycle(); }
 /** Requests saved by coalescing during the current cycle. */
-export const coalescedCount = () => cycleHits;
-
+export const coalescedCount = () => cycle.hits;
 export function bookableDatesCached(t: Omit<Target, "date">): Promise<BookableDates> {
-  const key = `${t.city}|${t.eventCode}`;
-  const hit = cycle.get(key);
-  if (hit) {
-    cycleHits++;
-    return hit;
-  }
-  const p = fetchBookableDates(t);
-  cycle.set(key, p);
-  return p;
+  return cycle.once(`dates|${t.city}|${t.eventCode}`, () => fetchBookableDates(t));
 }
-
 /** fetchShowtimes coalesced per (city, event, date) within a cycle. */
 export function fetchShowtimesCached(t: Target): Promise<Showtimes> {
-  const key = `${t.city}|${t.eventCode}|${t.date}`;
-  const hit = showtimesCycle.get(key);
-  if (hit) {
-    cycleHits++;
-    return hit;
-  }
-  const p = fetchShowtimes(t);
-  showtimesCycle.set(key, p);
-  return p;
+  return cycle.once(`shows|${t.city}|${t.eventCode}|${t.date}`, () => fetchShowtimes(t));
 }
 
 /** Exported for tests: the pure half of fetchBookableDates. */
@@ -463,31 +403,4 @@ export function parseBookableDates(html: string): string[] {
     if (m[1] !== PROBE_DATE) dates.add(m[1]!);
   }
   return [...dates].sort();
-}
-
-/**
- * "20260730" -> "Thu, 30 Jul".
- *
- * Builds the date in local time and formats it in local time, so the day never
- * shifts across timezones. Assumes a well-formed BMS date code: callers must
- * not pass the empty date a subscription watch carries (see `SUBSCRIPTION`),
- * because `Number("")` is 0 and that formats as a plausible-looking 1899 date
- * rather than failing. Pinned in `bms.test.ts`.
- */
-export function prettyDate(yyyymmdd: string): string {
-  const d = new Date(
-    +yyyymmdd.slice(0, 4),
-    +yyyymmdd.slice(4, 6) - 1,
-    +yyyymmdd.slice(6, 8),
-  );
-  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
-}
-
-/** Does a show's format match the filter? Case-insensitive, space-insensitive
- *  substring: "IMAX" catches "IMAX 3D"; "SCREENX" catches "3D SCREEN X".
- *  Used both for show attributes and for matching format-selector chip titles. */
-export function matchesFormat(attributes: string, filter: string): boolean {
-  const compact = (s: string) => s.toUpperCase().replace(/\s+/g, "");
-  const attr = compact(attributes ?? "");
-  return filter.split(",").some((f) => attr.includes(compact(f)));
 }

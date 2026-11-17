@@ -1,8 +1,9 @@
+import {classifySeatNotice} from './alert-notice.ts';
 import {Client,ChannelType,PermissionFlagsBits,type VoiceState} from 'discord.js';
 import {joinVoiceChannel,createAudioPlayer,createAudioResource,entersState,AudioPlayerStatus,NoSubscriberBehavior,StreamType,VoiceConnectionStatus,type VoiceConnection} from '@discordjs/voice';
 import {createReadStream,existsSync,mkdirSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {join,resolve} from 'node:path';
-import type {Json} from './district-mcp.ts';
+import type {Json} from './json.ts';
 export type VoiceTarget={guild:string;channel:string;owner:string;audio:string;ringtone:string};
 export function voiceTarget(env:NodeJS.ProcessEnv=process.env):VoiceTarget|undefined {
  if(!env.VOICE_ALERT_GUILD_ID&&!env.VOICE_ALERT_CHANNEL_ID)return;
@@ -11,11 +12,8 @@ export function voiceTarget(env:NodeJS.ProcessEnv=process.env):VoiceTarget|undef
  return {guild:ids[0]!,channel:ids[1]!,owner:ids[2]!,audio:env.VOICE_ALERT_AUDIO??resolve('assets/seat-alert.ogg'),ringtone:env.VOICE_ALERT_RINGTONE??resolve('assets/seat-ringtone.ogg')};
 }
 export function voiceNoticeKey(message:string,components:Json[]):string|undefined {
- const buttons=components.flatMap(row=>row.components??[]);
- const confirm=buttons.find(b=>String(b.custom_id).startsWith('district:holdonly:'));
- const stop=buttons.some(b=>String(b.custom_id).startsWith('district:stoprenewal:'));
- if(!confirm||confirm.disabled&&!stop)return;
- return `${message}:${stop?(confirm.disabled?'expiry':'renewal-ready'):'seats'}`;
+ const kind=classifySeatNotice(components).voiceKind;
+ return kind?`${message}:${kind}`:undefined;
 }
 export class VoiceNoticeLedger {
  private seen:string[]=[];

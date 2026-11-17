@@ -1,12 +1,14 @@
 /** Owner-requested DM reminders. Never copies consent buttons or submits booking actions. */
 import {existsSync,mkdirSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
-import {DistrictHttpError,type Json} from './district-mcp.ts';
-import {sendDiscord,type DiscordDelivery,type AlertSender} from './doomsday-monitor.ts';
+import {HttpError} from './http-error.ts';
+import type {Json} from './json.ts';
+import {sendDiscord,type DiscordDelivery,type AlertSender} from './discord-delivery.ts';
 type Notice={channel:string;message:string;expires:number;key:string};
 type State={pending:Notice[];dismissed:string[];nextAt:number;failures:number};
 export const reminderIntervalMs=500;
-export const reminderStopId='seatsniper:reminders:stop';
+import {classifySeatNotice,reminderStopId} from './alert-notice.ts';
+export {reminderStopId} from './alert-notice.ts';
 export const reminderControls:Json[]=[{type:1,components:[{type:2,style:2,label:'Stop alerts',custom_id:reminderStopId}]}];
 export class DiscordReminders {
  private state:State;private path:string;private busy=false;private generation=0;
@@ -15,14 +17,11 @@ export class DiscordReminders {
   this.state=existsSync(this.path)?JSON.parse(readFileSync(this.path,'utf8')):{pending:[],dismissed:[],nextAt:0,failures:0};
  }
  observe(delivery:DiscordDelivery,content:string,components:Json[]){
-  const buttons=components.flatMap(row=>row.components??[]);
-  const hold=buttons.find(b=>String(b.custom_id).startsWith('district:holdonly:')&&!b.disabled);
-  const kind=buttons.some(b=>String(b.custom_id).startsWith('district:stoprenewal:'))?'renewal':'seats';
-  const key=`${delivery.message}:${kind}`;
-  const timestamps=[...content.matchAll(/<t:(\d+):R>/g)].map(m=>Number(m[1])*1000);
-  const expires=timestamps.at(-1)??0;
+  const notice=classifySeatNotice(components,content);
+  const key=`${delivery.message}:${notice.reminderKind}`;
+  const expires=notice.expires;
   this.state.pending=this.state.pending.filter(n=>n.message!==delivery.message);
-  if(hold&&expires>this.now()&&!this.state.dismissed.includes(key)){
+  if(notice.holdReady&&expires>this.now()&&!this.state.dismissed.includes(key)){
    this.state.pending.push({...delivery,key,expires});
    if(!this.state.nextAt)this.state.nextAt=this.now()+reminderIntervalMs;
   }
@@ -72,7 +71,7 @@ export function createReminderSender(request:typeof fetch=fetch,now=Date.now):Al
  const guarded=(async(input:Parameters<typeof fetch>[0],init?:RequestInit)=>{
   const url=String(input),dm=url.endsWith('/users/@me/channels');
   if(dm&&channel)return Response.json(channel);
-  if(now()<blockedUntil)throw new DistrictHttpError(429,new Headers({'Retry-After':String((blockedUntil-now())/1000)}),'Discord reminder');
+  if(now()<blockedUntil)throw new HttpError(429,new Headers({'Retry-After':String((blockedUntil-now())/1000)}),'Discord reminder');
   const response=await request(input,init);
   const reset=Number(response.headers.get('x-ratelimit-reset-after'))*1000;
   const remaining=response.headers.get('x-ratelimit-remaining');
@@ -81,7 +80,7 @@ export function createReminderSender(request:typeof fetch=fetch,now=Date.now):Al
    const body=await response.clone().json().catch(()=>({})) as Json;
    const retry=Math.max(Number(response.headers.get('retry-after'))||0,Number(body.retry_after)||0)*1000;
    blockedUntil=Math.max(blockedUntil,now()+(retry||60_000));
-   throw new DistrictHttpError(429,new Headers({'Retry-After':String((blockedUntil-now())/1000)}),'Discord reminder');
+   throw new HttpError(429,new Headers({'Retry-After':String((blockedUntil-now())/1000)}),'Discord reminder');
   }
   if(dm&&response.ok)channel=await response.clone().json() as Json;
   return response;

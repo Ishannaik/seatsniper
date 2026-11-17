@@ -1,0 +1,199 @@
+{
+  "alert-notice.ts": [
+    "json.ts"
+  ],
+  "bms.ts": [
+    "filters.ts",
+    "movie-model.ts",
+    "provider-error.ts",
+    "read-cycle.ts",
+    "time-filter.ts"
+  ],
+  "booking-preferences.ts": [
+    "movie-model.ts"
+  ],
+  "commands.ts": [
+    "dm-command.ts",
+    "filters.ts"
+  ],
+  "db.ts": [
+    "watch-policy.ts"
+  ],
+  "discord-delivery.ts": [
+    "http-error.ts",
+    "json.ts"
+  ],
+  "discord-reminders.ts": [
+    "alert-notice.ts",
+    "discord-delivery.ts",
+    "http-error.ts",
+    "json.ts"
+  ],
+  "discord-voice-alerts.ts": [
+    "alert-notice.ts",
+    "json.ts"
+  ],
+  "district-alerts.ts": [
+    "district-state.ts",
+    "json.ts",
+    "seat-suggestion.ts"
+  ],
+  "district-booking-application.ts": [
+    "district-alerts.ts",
+    "district-booking.ts",
+    "district-mcp.ts",
+    "district-state.ts",
+    "hold-renewal.ts",
+    "legacy-movie-policy.ts",
+    "monitor-runtime.ts",
+    "seat-suggestion.ts"
+  ],
+  "district-booking-discord.ts": [
+    "district-alerts.ts",
+    "district-booking-application.ts",
+    "district-booking.ts",
+    "district.ts",
+    "hold-renewal.ts",
+    "monitor-runtime.ts"
+  ],
+  "district-booking.ts": [
+    "district-response.ts",
+    "district-state.ts",
+    "json.ts",
+    "legacy-movie-policy.ts",
+    "seat-suggestion.ts"
+  ],
+  "district-events.ts": [
+    "movie-model.ts",
+    "provider-error.ts"
+  ],
+  "district-mcp.ts": [
+    "district-response.ts",
+    "district-state.ts",
+    "http-error.ts",
+    "json.ts"
+  ],
+  "district-response.ts": [
+    "json.ts"
+  ],
+  "district-state.ts": [
+    "json.ts"
+  ],
+  "district.ts": [
+    "movie-model.ts",
+    "provider-error.ts"
+  ],
+  "dm-command.ts": [
+    "watch-policy.ts"
+  ],
+  "dm-watches.ts": [
+    "dm-command.ts",
+    "filters.ts",
+    "json.ts",
+    "movie-reader.ts",
+    "providers.ts",
+    "read-cycle.ts",
+    "time-filter.ts",
+    "watch-policy.ts"
+  ],
+  "doomsday-cloud.ts": [
+    "alert-notice.ts",
+    "commands.ts",
+    "discord-delivery.ts",
+    "discord-reminders.ts",
+    "discord-voice-alerts.ts",
+    "district-booking-discord.ts",
+    "dm-command.ts",
+    "dm-watches.ts",
+    "doomsday-monitor.ts",
+    "pvr-monitor.ts",
+    "user-dm-watches.ts"
+  ],
+  "doomsday-monitor.ts": [
+    "discord-delivery.ts",
+    "district-alerts.ts",
+    "district-booking-application.ts",
+    "district-mcp.ts",
+    "district-response.ts",
+    "json.ts",
+    "legacy-movie-policy.ts",
+    "monitor-runtime.ts",
+    "polling.ts",
+    "seat-suggestion.ts"
+  ],
+  "filters.ts": [],
+  "hold-renewal.ts": [
+    "discord-delivery.ts",
+    "district-alerts.ts",
+    "json.ts",
+    "legacy-movie-policy.ts",
+    "seat-suggestion.ts"
+  ],
+  "http-error.ts": [],
+  "index.ts": [
+    "bms.ts",
+    "booking-preferences.ts",
+    "commands.ts",
+    "db.ts",
+    "district-booking-discord.ts",
+    "district-events.ts",
+    "filters.ts",
+    "messages.ts",
+    "providers.ts",
+    "stagger.ts",
+    "time-filter.ts"
+  ],
+  "json.ts": [],
+  "legacy-movie-policy.ts": [],
+  "messages.ts": [
+    "movie-model.ts",
+    "time-filter.ts"
+  ],
+  "monitor-runtime.ts": [
+    "district-mcp.ts",
+    "district-state.ts",
+    "json.ts",
+    "polling.ts"
+  ],
+  "movie-model.ts": [],
+  "movie-reader.ts": [
+    "bms.ts",
+    "filters.ts",
+    "movie-model.ts",
+    "providers.ts",
+    "read-cycle.ts"
+  ],
+  "polling.ts": [
+    "http-error.ts"
+  ],
+  "provider-error.ts": [],
+  "providers.ts": [
+    "bms.ts",
+    "district-events.ts",
+    "district.ts",
+    "movie-model.ts",
+    "provider-error.ts",
+    "read-cycle.ts",
+    "time-filter.ts"
+  ],
+  "pvr-monitor.ts": [
+    "discord-delivery.ts",
+    "http-error.ts",
+    "json.ts",
+    "legacy-movie-policy.ts",
+    "polling.ts"
+  ],
+  "read-cycle.ts": [],
+  "register.ts": [
+    "commands.ts"
+  ],
+  "seat-suggestion.ts": [],
+  "stagger.ts": [],
+  "time-filter.ts": [],
+  "user-dm-watches.ts": [
+    "dm-watches.ts",
+    "json.ts",
+    "read-cycle.ts"
+  ],
+  "watch-policy.ts": []
+}

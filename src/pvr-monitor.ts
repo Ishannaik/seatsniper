@@ -1,12 +1,14 @@
+import { legacyMoviePolicy, legacyPvrPolicy, legacyPvrLink, legacyPriceLabel } from './legacy-movie-policy.ts';
 /** PVR INOX's anonymous website showtime feed. Read-only: never holds or pays. */
 import {existsSync,mkdirSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
-import {DistrictHttpError,type Json} from './district-mcp.ts';
-import {MonitorPoller} from './monitor-runtime.ts';
-import {sendDiscord,type AlertSender,type DiscordDelivery} from './doomsday-monitor.ts';
-export const pvrCinema='349';
-export const pvrDates=['2026-12-16','2026-12-17'];
-export const pvrLink='https://www.pvrcinemas.com/cinemasessions/Mumbai/HDFC-Millennia-PVR-ICON-Oberoi-Mall-Goregaon-E/349';
+import {HttpError} from './http-error.ts';
+import type {Json} from './json.ts';
+import {MonitorPoller} from './polling.ts';
+import {sendDiscord,type AlertSender,type DiscordDelivery} from './discord-delivery.ts';
+export const pvrCinema=legacyPvrPolicy.cinema;
+export const pvrDates=legacyMoviePolicy.datePriority;
+export const pvrLink=legacyPvrLink;
 export type PvrShow={date:string;time:string;timestamp:number;session:string;format:string;bookingUrl:string};
 /** The opaque show token is published by PVR; never construct one from session IDs. */
 export function pvrBookingUrl(encrypted:unknown):string {
@@ -18,7 +20,7 @@ export function validatePvr(payload:Json):Json {
  const o=payload.output,c=o.cinemaRe;
  if(String(c?.theatreId)!==pvrCinema||c.cityName!=='Mumbai'||!/oberoi mall/i.test(c.name??'')||/sky city/i.test(c.name??''))throw Error('PVR cinema identity mismatch');
  if(!Array.isArray(o.days)||!Array.isArray(o.cinemaMovieSessions)||o.days.some((d:Json)=>!/^\d{4}-\d{2}-\d{2}$/.test(d.dt??'')||typeof d.enable!=='boolean'))throw Error('PVR showtime schema changed');
- if(c.screens?.['880']?.screenType!=='PXL'||c.screens?.['880']?.screenName!=='SCREEN 2')throw Error('PVR Oberoi PXL screen identity changed');
+ if(c.screens?.[legacyPvrPolicy.screen]?.screenType!=='PXL'||c.screens?.[legacyPvrPolicy.screen]?.screenName!==legacyPvrPolicy.screenName)throw Error('PVR Oberoi PXL screen identity changed');
  return o;
 }
 export class PvrClient {
@@ -26,7 +28,7 @@ export class PvrClient {
  async schedule(date='NA'):Promise<Json>{
   if(date!=='NA'&&!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Error('Invalid PVR date');
   const r=await this.request('https://api3.pvrcinemas.com/api/v1/booking/content/csessions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer ',chain:'PVR',city:'Mumbai',country:'INDIA',appVersion:'1.0',platform:'WEBSITE',Origin:'https://www.pvrcinemas.com',Referer:'https://www.pvrcinemas.com/'},body:JSON.stringify({city:'Mumbai',cid:pvrCinema,lat:'19.173905',lng:'72.861012',dated:date,qr:'NO',cineType:'',cineTypeQR:''}),signal:AbortSignal.timeout(20_000),redirect:'error'});
-  if(!r.ok)throw new DistrictHttpError(r.status,r.headers,'PVR public showtimes');
+  if(!r.ok)throw new HttpError(r.status,r.headers,'PVR public showtimes');
   return validatePvr(await r.json() as Json);
  }
 }
@@ -42,9 +44,9 @@ export function selectPvrShow(o:Json,date:string,now=Date.now()):PvrShow|undefin
    for(const s of experience.shows){
     if(String(s.theatreId)!==pvrCinema||!filmIds.has(String(s.movieId)))throw Error('PVR show identity mismatch');
     if(s.showDate!==date||s.showDateStr!==date)throw Error('PVR substituted a different date');
-    if(String(s.screenId)!=='880')continue;
-    if(s.screenName!=='SCREEN 2'||s.screenType!=='PXL')throw Error('PVR PXL show identity mismatch');
-    if(s.language!=='English')continue;
+    if(String(s.screenId)!==legacyPvrPolicy.screen)continue;
+    if(s.screenName!==legacyPvrPolicy.screenName||s.screenType!=='PXL')throw Error('PVR PXL show identity mismatch');
+    if(s.language!==legacyMoviePolicy.language)continue;
     const timestamp=s.showTimeStamp;
     if(typeof timestamp!=='number'||!Number.isFinite(timestamp)||new Date(timestamp+330*60_000).toISOString().slice(0,10)!==date)throw Error('PVR show timestamp mismatch');
     if(timestamp<=now||s.status!==1||s.statusTxt!=='Available')continue;
@@ -79,7 +81,7 @@ export function createPvrPoller(send:AlertSender=sendDiscord,notice:PvrNotice=()
    const key=`checkout-v1:${match.date}:${match.session}:${match.timestamp}:${match.format}`;
    delivery=state.delivered?.[key];
    if(!delivery){
-    const content=`PVR INOX DIRECT — Doomsday show listed as AVAILABLE\nOberoi Mall, Goregaon · Screen 2 PXL · ${match.date} ${match.time} IST · English · ${match.format}\nThis is a PVR listing alert, not a verified seat recommendation. Three adjacent central seats and the ₹1,200-per-seat cap are NOT verified here.\nClick Book on PVR — Woohoo to open this exact show. Choose 3 adjacent central seats (around the third row from the back, or recliners) at up to ₹1,200 each, then review the final total. In PVR checkout, choose Gift Card and enter your Woohoo PVR INOX card number and PIN privately. Pay any remainder using a method PVR offers. Nothing held or paid by this bot. District confirmations are separate.\nReply here or click Stop alerts to stop reminders. If you book directly on PVR, reply here to acknowledge it.`;
+    const content=`PVR INOX DIRECT — Doomsday show listed as AVAILABLE\nOberoi Mall, Goregaon · Screen 2 PXL · ${match.date} ${match.time} IST · English · ${match.format}\nThis is a PVR listing alert, not a verified seat recommendation. Three adjacent central seats and the ₹${legacyPriceLabel()}-per-seat cap are NOT verified here.\nClick Book on PVR — Woohoo to open this exact show. Choose 3 adjacent central seats (around the third row from the back, or recliners) at up to ₹${legacyPriceLabel()} each, then review the final total. In PVR checkout, choose Gift Card and enter your Woohoo PVR INOX card number and PIN privately. Pay any remainder using a method PVR offers. Nothing held or paid by this bot. District confirmations are separate.\nReply here or click Stop alerts to stop reminders. If you book directly on PVR, reply here to acknowledge it.`;
     delivery=await send(content,[{type:1,components:[{type:2,style:5,label:'Book on PVR — Woohoo',url:match.bookingUrl},{type:2,style:5,label:'PVR cinema listings',url:pvrLink},{type:2,style:2,label:'Stop alerts',custom_id:'seatsniper:reminders:stop'}]}])??undefined;
     state.delivered={...(state.delivered??{}),[key]:delivery};state.delivered=Object.fromEntries(Object.entries(state.delivered).slice(-100));save(path,state);
    }

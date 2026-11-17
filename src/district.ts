@@ -1,5 +1,5 @@
 /** District movies: public SSR data only. No login, checkout or seat holds. */
-import type { Show, Target } from "./bms.ts";
+import type { Show, Target } from "./movie-model.ts";
 import { BmsError } from "./provider-error.ts";
 
 export function parseDistrictUrl(input: string): Omit<Target, "date"> & { date?: string } {

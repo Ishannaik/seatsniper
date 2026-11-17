@@ -23,8 +23,8 @@
  *   image      nothing to show that the words don't say.
  */
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
-import type { Show } from "./bms.ts";
-import { prettyDate } from "./bms.ts";
+import type { Show } from "./movie-model.ts";
+import { prettyDate } from "./time-filter.ts";
 
 export const LIVE = 0x2ecc71;
 export const ARMED = 0x4a4d52;

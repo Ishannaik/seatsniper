@@ -15,11 +15,12 @@ import {
   seenDates, recordSeenDates, seenVenues, recordSeenVenues, shouldSilentSeedVenues,
   isSubscription, SUBSCRIPTION, MAX_WATCHES_PER_USER, type Watch,
 } from "./db.ts";
-import { parseTimeFilter, matchesTimeFilter } from "./time-filter.ts";
+import { parseTimeFilter, matchesTimeFilter, isRealDateCode, todayIST } from "./time-filter.ts";
 import {
-  FORMAT_CHOICES, DAY_CHOICES, formatSuggestions, normaliseFormats, normaliseDays, matchesFormat,
+  normaliseFormats, normaliseDays, matchesFormat,
   matchesDay, matchesTheatre, normaliseTheatres, filterSummary,
 } from "./filters.ts";
+import { commandSuggestions } from "./commands.ts";
 import { staggerBounds, staggerDelayMs } from "./stagger.ts";
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -38,9 +39,7 @@ const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL?.trim() || "";
 function normaliseDate(input: string): string {
   const d = input.trim().replace(/[-/]/g, "");
   if (!/^\d{8}$/.test(d)) throw new BmsError("bad_url", `Date must look like 2026-07-30, got "${input}"`);
-  const [y, m, day] = [+d.slice(0, 4), +d.slice(4, 6), +d.slice(6, 8)];
-  const actual = new Date(Date.UTC(y, m - 1, day));
-  if (actual.getUTCFullYear() !== y || actual.getUTCMonth() !== m - 1 || actual.getUTCDate() !== day) {
+  if (!isRealDateCode(d)) {
     throw new BmsError("bad_url", `"${input}" isn't a real date.`);
   }
   return d;
@@ -559,11 +558,6 @@ async function dm(w: Watch, payload: { embeds: unknown[]; components?: unknown[]
   }
 }
 
-/** YYYYMMDD for today in IST — BookMyShow's dates are Indian local dates. */
-function todayIST(): string {
-  const ist = new Date(Date.now() + 5.5 * 3600_000); // UTC+5:30, no DST in India
-  return ist.toISOString().slice(0, 10).replace(/-/g, "");
-}
 
 /**
  * A watch whose date has passed can never fire — BookMyShow stops listing the date
@@ -640,14 +634,7 @@ client.on("interactionCreate", async (i) => {
   if (await handleDistrictBooking(i)) return;
   // Autocomplete for /watch format + days options.
   if (i.isAutocomplete()) {
-    const focused = i.options.getFocused(true);
-    const val = focused.value.toLowerCase();
-    const choices = focused.name === "format" ? FORMAT_CHOICES : DAY_CHOICES;
-    const matches = choices
-      .filter((c) => c.toLowerCase().includes(val))
-      .slice(0, 25)
-      .map((c) => ({ name: c, value: c }));
-    return void i.respond(focused.name === "format" ? formatSuggestions(String(focused.value)) : matches).catch(() => {});
+    return void i.respond(commandSuggestions("classic", i.commandName, i.options.getFocused(true))).catch(() => {});
   }
   if (!i.isChatInputCommand()) return;
   try {
