@@ -261,7 +261,10 @@ src/
   register.ts     slash command registration
   time-filter.ts  IST after/before time filter parser and show matcher
 assets/            logo
-docs/              design specs and measured findings
+docs/
+  ops.md          self-hosting operations notes
+  releasing.md    release checklist: version bump, changelog, tag
+  superpowers/    design specs and measured findings
 ```
 
 <a id="bookmyshow-quirks"></a>
