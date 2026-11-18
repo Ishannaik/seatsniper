@@ -112,6 +112,9 @@ docker compose run --rm seatsniper bun run commands   # register slash commands
 docker compose up -d
 ```
 
+Docker users do not need to run `bun pm trust --all` manually; the image's
+dependency setup handles the required native dependency.
+
 The database lives in a named volume, so the bot survives container restarts.
 
 There is no HTTP healthcheck. `docker compose ps` showing "up" only means the
