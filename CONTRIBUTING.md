@@ -2,7 +2,8 @@
 
 Bug reports, feature ideas, and pull requests are welcome. The bot is small
 on purpose. Before you open a PR, read the constraints below, because they
-were measured against the live BookMyShow site and are easy to regress.
+were measured against the live BookMyShow and District sites and are easy to
+regress.
 
 ## Setup
 
@@ -11,7 +12,7 @@ bun install
 cp .env.example .env       # DISCORD_TOKEN, DISCORD_CLIENT_ID
 bun run commands           # register slash commands
 bun run dev                # watch mode
-bun test
+bun run check              # typecheck, lint, quality, deadcode, and unit tests
 ```
 
 `bun run commands` with `DISCORD_GUILD_ID` set registers instantly in one
@@ -25,7 +26,7 @@ Most of those issues need no Discord token and no live BookMyShow access.
 
 Before you pick one up, remember the hard constraints below: Safari TLS only,
 errors are never silent `[]`, and the poller is not a headless browser. The
-gate before opening a PR is `bun test`.
+gate before opening a PR is `bun run check`.
 
 ## Hard constraints (do not regress)
 
@@ -33,7 +34,7 @@ The full write-up is in
 [`docs/superpowers/specs/2026-07-27-bms-access-findings.md`](docs/superpowers/specs/2026-07-27-bms-access-findings.md).
 
 1. **TLS profile is Safari.** The poller uses `node-tls-client` with
-   `safari_ios_18_0`. Chrome profiles get Cloudflare challenges, and custom
+   `safari_ios_17_0`. Chrome profiles get Cloudflare challenges, and custom
    headers on top of the profile cause 403s. Do not add either.
 2. **Availability is a field comparison.** When the requested date is closed,
    BookMyShow silently substitutes the nearest bookable date. The URL, the
@@ -55,10 +56,11 @@ The full write-up is in
 - Join the Discord (https://discord.gg/KKvtRhQvRv) before picking an issue, and claim it there or comment on the issue.
 - Keep the change to one thing. If a PR touches more than one feature, split
   it.
-- Run `bun test` before opening the PR. The CI workflow runs the same tests.
-- For anything that changes how BookMyShow is read, add or update a unit test
-  in `src/bms.test.ts` and explain the observed behavior you are coding
-  against.
+- Run `bun run check` (`bun test`, `tsc --noEmit`, Biome, `quality`, `deadcode`)
+  before opening the PR. The CI workflow runs the same gates.
+- For anything that changes how BookMyShow or District is read, add or update a
+  unit test (`src/bms.test.ts`, `src/district.test.ts`, `src/district-events.test.ts`)
+  and explain the observed behavior you are coding against.
 - Copy for Discord messages lives in `src/messages.ts`. Keep new messages in
   the same voice.
 

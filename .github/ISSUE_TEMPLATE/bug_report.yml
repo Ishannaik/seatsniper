@@ -16,11 +16,11 @@ body:
     validations:
       required: true
   - type: input
-    id: bms-link
+    id: watch-link
     attributes:
-      label: BookMyShow link
-      description: The link you watched (event code + city are the important parts)
-      placeholder: "in.bookmyshow.com/movies/mumbai/.../buytickets/ET00480917/..."
+      label: BookMyShow or District link
+      description: The link you watched (provider, city, and event/movie code are the important parts)
+      placeholder: "https://in.bookmyshow.com/movies/mumbai/.../buytickets/ET00480917/... or https://www.district.in/movies/..."
   - type: textarea
     id: steps
     attributes:
@@ -45,4 +45,4 @@ body:
     id: logs
     attributes:
       label: Bot logs
-      description: Console output around the failure, if any
+      description: Console output around the failure, if any (redact tokens!)

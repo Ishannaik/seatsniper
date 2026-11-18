@@ -11,23 +11,23 @@ body:
     id: problem
     attributes:
       label: What problem does this solve?
-      placeholder: "I keep missing the moment Friday shows go on sale and I want to be woken up."
+      placeholder: "I keep missing the moment Friday shows go on sale and want tighter filtering."
     validations:
       required: true
   - type: textarea
     id: idea
     attributes:
       label: Proposed behaviour
-      placeholder: "A /watch option that sends the DM with a louder notification or a follow-up."
+      placeholder: "A /watch option or alert improvement with concrete inputs and expected DM output."
     validations:
       required: true
   - type: dropdown
     id: scope
     attributes:
       label: Fits the project?
-      description: "The non-goals are in README: seat selection, checkout automation, other providers, web dashboard."
+      description: "SeatSniper is strictly read-only: account login, seat holding, checkout automation, and web dashboards are non-goals."
       options:
-        - "Yes, within current non-goals"
+        - "Yes, within read-only alerting scope"
         - "It would expand the non-goals"
     validations:
       required: true

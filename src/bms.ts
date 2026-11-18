@@ -15,58 +15,38 @@
  *    a field comparison, never a keyword or frequency heuristic.
  */
 import * as tls from "node-tls-client";
-import { ReadCycle } from "./read-cycle.ts";
-import type { Show, Target, FormatChip } from "./movie-model.ts";
-import { istToEpoch, prettyDate } from "./time-filter.ts";
-import { showsOnDate } from "./movie-model.ts";
-export type { Show, Target, FormatChip } from "./movie-model.ts";
-export { showsOnDate } from "./movie-model.ts";
-export { istToEpoch, prettyDate } from "./time-filter.ts";
-/** Does a show's format match the filter? Case-insensitive, space-insensitive
- *  substring: "IMAX" catches "IMAX 3D"; "SCREENX" catches "3D SCREEN X".
- *  Used both for show attributes and for matching format-selector chip titles. */
-export { matchesFormat } from "./filters.ts";
+import {
+  cleanWatchInput,
+  type FormatChip,
+  type Show,
+  type Target,
+  type TicketCategory,
+} from "./movie-model.ts";
+import { BmsError } from "./provider-error.ts";
+import { istToEpoch } from "./time-filter.ts";
 
-// ponytail: pinned profile, but rotatable so an operator can react when
-// Cloudflare's scoring shifts without editing code and redeploying.
-//
-// The default is measured, not arbitrary — see the access findings doc quoted
-// in the file header. Only Safari/Firefox profiles are supported overrides;
-// Chrome profiles are served challenges by BookMyShow, so never make one the
-// default and never document one as an option.
-export const DEFAULT_TLS_PROFILE = "safari_ios_18_0";
+// Only Safari/Firefox profiles are supported overrides; Chrome profiles are served
+// challenges by BookMyShow, so never make one the default or document one as an option.
+// Re-measured 2026-11-17 from Oracle VPS with tls-client lib v1.18.1: safari_ios_18_0
+// started getting 403; safari_ios_17_0 gets 200 with a real page, 4/4 runs.
+export const DEFAULT_TLS_PROFILE = "safari_ios_17_0";
 
-/**
- * Which node-tls-client profile to open the session with.
- *
- * Read at init rather than at import, so a .env loaded by the host is picked up
- * and tests can drive it. An unset, empty or whitespace-only value falls back
- * to the pinned default; a non-empty one is taken at face value and validated
- * by `resolveClientIdentifier`.
- */
 export function resolveTlsProfile(env: Record<string, string | undefined> = process.env): string {
   return env.BMS_TLS_PROFILE?.trim() || DEFAULT_TLS_PROFILE;
 }
 
-/** Profile families BookMyShow serves without a challenge. */
 const SUPPORTED_TLS_FAMILIES = ["safari", "firefox"] as const;
 
 /**
- * Map a profile name onto node-tls-client's identifier, failing loudly.
- *
- * A typo in BMS_TLS_PROFILE must stop the bot at startup, not silently fall
- * back to the default (which would hide the misconfiguration) or to whatever
- * the library picks by itself (which could be Chrome).
- *
- * Being a real ClientIdentifier key is not enough. node-tls-client ships Chrome
- * profiles too, and BookMyShow serves those Cloudflare challenges — a bot
- * started on one polls forever and never notifies. So the allowlist is by
- * family, not by "does the library know this name".
+ * Map a profile name onto node-tls-client's identifier, failing loudly so a typo
+ * in BMS_TLS_PROFILE or a Chrome profile stops startup rather than polling challenged pages.
  */
-export function resolveClientIdentifier(profile: string = resolveTlsProfile()): string {
+export function resolveClientIdentifier(
+  profile: string = resolveTlsProfile(),
+): tls.ClientIdentifier {
   const name = profile.trim();
-  const { ClientIdentifier } = tls as any;
-  const id = ClientIdentifier[name];
+  const lookup = tls.ClientIdentifier as Record<string, tls.ClientIdentifier | undefined>;
+  const id = lookup[name];
   const supported = SUPPORTED_TLS_FAMILIES.some((family) => name.startsWith(family));
 
   if (!supported) {
@@ -88,40 +68,82 @@ export function resolveClientIdentifier(profile: string = resolveTlsProfile()): 
   return id;
 }
 
-/** Anything that is not a confident, parsed answer. Never swallowed into `[]`. */
-import { BmsError } from "./provider-error.ts";
-export { BmsError } from "./provider-error.ts";
+/** Rotate the native TLS session once every 24h at cycle boundary to bound cookie-jar growth. */
+export const SESSION_MAX_AGE_MS = 86_400_000;
 
-let session: any = null;
+let session: tls.Session | null = null;
+let sessionClientId: tls.ClientIdentifier | null = null;
+let sessionOpenedAt = 0;
 
 export async function initBms(): Promise<void> {
-  const { Session, initTLS } = tls as any;
-  // Validate the profile before spinning up the native TLS layer, so a typo in
-  // BMS_TLS_PROFILE fails immediately and cheaply.
   const id = resolveClientIdentifier();
-  await initTLS();
-  session = new Session({ clientIdentifier: id, timeout: 30_000 });
+  await tls.initTLS();
+  sessionClientId = id;
+  session = new tls.Session({ clientIdentifier: id, timeout: 30_000 });
+  sessionOpenedAt = Date.now();
 }
 
 export async function closeBms(): Promise<void> {
   await session?.close().catch(() => {});
   session = null;
+  sessionClientId = null;
+  sessionOpenedAt = 0;
+  if (typeof tls.destroyTLS === "function") {
+    await tls.destroyTLS().catch(() => {});
+  }
+}
+
+export function rotateSessionIfStale(now = Date.now()): boolean {
+  if (!session || !sessionClientId || now - sessionOpenedAt <= SESSION_MAX_AGE_MS) {
+    return false;
+  }
+  const stale = session;
+  session = new tls.Session({ clientIdentifier: sessionClientId, timeout: 30_000 });
+  sessionOpenedAt = now;
+  void stale.close().catch(() => {});
+  return true;
+}
+
+const RESERVED_BMS_SEGMENTS = new Set(
+  "explore buytickets movies events plays sports activities stream cinemas".split(" "),
+);
+
+function parseBmsCityAndSlug(
+  pathname: string,
+): { city: string; slug: string; date?: string } | null {
+  const moviesFirst = pathname.match(
+    /^\/movies\/([a-z][a-z-]*)\/([a-z0-9-]+)\/(?:buytickets\/)?ET\d{6,}(?:\/(\d{8}))?\/?$/i,
+  );
+  if (moviesFirst && !RESERVED_BMS_SEGMENTS.has(moviesFirst[1]!.toLowerCase())) {
+    const slug = moviesFirst[2]!.toLowerCase();
+    return {
+      city: moviesFirst[1]!.toLowerCase(),
+      slug: slug === "buytickets" ? "movie" : slug,
+      ...(moviesFirst[3] ? { date: moviesFirst[3] } : {}),
+    };
+  }
+  const cityFirst = pathname.match(
+    /^\/([a-z][a-z-]*)\/movies\/([a-z0-9-]+)\/(?:buytickets\/)?ET\d{6,}(?:\/(\d{8}))?\/?$/i,
+  );
+  if (cityFirst && !RESERVED_BMS_SEGMENTS.has(cityFirst[1]!.toLowerCase())) {
+    return {
+      city: cityFirst[1]!.toLowerCase(),
+      slug: cityFirst[2]!.toLowerCase(),
+      ...(cityFirst[3] ? { date: cityFirst[3] } : {}),
+    };
+  }
+  return null;
 }
 
 /**
  * Pull city/event code (and date, if present) out of a pasted BookMyShow link.
  *
- * Measured 2026-07-27 against ET00480917: the **slug is ignored** by BookMyShow —
- * a deliberately wrong slug returns byte-for-byte equivalent results, because the ET
- * code is authoritative. The **city is not**: the same event on the same date returns
- * 51 shows for mumbai, 25 for delhi, 10 for pune. So a missing slug is harmless and a
- * missing city is a hard error — defaulting it would silently watch another city's
- * theatres.
+ * Measured 2026-07-27 against ET00480917: the slug is ignored by BookMyShow (ET code
+ * is authoritative), while city changes which theatres are returned — so a missing
+ * city is a hard error rather than defaulted.
  */
 export function parseWatchUrl(input: string): Omit<Target, "date"> & { date?: string } {
-  // Discord users paste <url> to suppress the link preview; strip that and any
-  // surrounding whitespace or trailing punctuation before matching.
-  const raw = input.trim().replace(/^<|>$/g, "").trim();
+  const raw = cleanWatchInput(input);
 
   if (!/^(https?:\/\/)?([a-z0-9-]+\.)*bookmyshow\.com\//i.test(raw)) {
     throw new BmsError(
@@ -139,27 +161,24 @@ export function parseWatchUrl(input: string): Omit<Target, "date"> & { date?: st
     );
   }
 
-  // Ignore query string and fragment so ?utm_source=… and #anchor can't be mistaken
-  // for path segments.
-  const path = raw.split(/[?#]/)[0]!;
-
-  const city = path.match(/\/movies\/([a-z][a-z-]*)\//i)?.[1]?.toLowerCase();
-  if (!city) {
+  const withoutHost = raw
+    .split(/[?#]/)[0]!
+    .replace(/^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*bookmyshow\.com/i, "");
+  const parsed = parseBmsCityAndSlug(withoutHost);
+  if (!parsed) {
     throw new BmsError(
       "bad_url",
       "Couldn't tell which city that link is for, and I won't guess — show timings " +
         "differ per city. Use a link that looks like " +
-        "`.../movies/mumbai/<movie>/buytickets/ET…`.",
+        "`.../movies/mumbai/<movie>/buytickets/ET…` or `.../mumbai/movies/<movie>/ET…`.",
     );
   }
 
   return {
-    city,
-    // Verified ignored by BookMyShow; kept only because the path shape expects a
-    // segment there. Do not add a lookup to "correct" it.
-    slug: path.match(/\/movies\/[a-z][a-z-]*\/([a-z0-9-]+)\//i)?.[1]?.toLowerCase() ?? "movie",
+    city: parsed.city,
+    slug: parsed.slug,
     eventCode: et,
-    date: path.match(/\/(\d{8})\/?$/)?.[1],
+    date: parsed.date,
   };
 }
 
@@ -167,57 +186,43 @@ export function showtimesUrl(t: Target): string {
   return `https://in.bookmyshow.com/movies/${t.city}/${t.slug}/buytickets/${t.eventCode}/${t.date}`;
 }
 
-/**
- * The movie's real name plus every showtime BookMyShow rendered for this page,
- * whatever date those shows belong to.
- *
- * Throws rather than returning empty whenever the page is not recognisably a real
- * BookMyShow movie page — a Cloudflare block is a 200 with a plausible HTML body,
- * and treating that as "no shows" is the bug that silently kills every similar
- * project.
- */
-export async function fetchShowtimes(t: Target): Promise<{ title: string; shows: Show[] }> {
-  const { title, html } = await fetchPage(t);
-  if (!html.includes("showtimesSections")) return { title, shows: [] }; // real page, no shows
-  return { title, shows: parseShows(html) };
+export async function fetchShowtimes(
+  t: Target,
+): Promise<{ title: string; shows: Show[]; chips: FormatChip[]; posterUrl?: string }> {
+  const { title, html, posterUrl } = await fetchPage(t);
+  const chips = parseFormatChips(html, t.eventCode);
+  const posterSpread = posterUrl ? { posterUrl } : {};
+  if (!html.includes("showtimesSections")) {
+    return { title, shows: [], chips, ...posterSpread };
+  }
+  return { title, shows: parseShows(html), chips, ...posterSpread };
 }
 
-/** Fetch + validate a buytickets page. Every caller goes through this. */
-async function fetchPage(t: Target): Promise<{ title: string; html: string }> {
+async function fetchPage(t: Target): Promise<{ title: string; html: string; posterUrl?: string }> {
   if (!session) throw new BmsError("unparseable", "initBms() was not called");
 
-  let res: any;
+  let res: tls.Response;
   try {
     res = await session.get(showtimesUrl(t));
   } catch (e) {
     throw new BmsError("network", `request failed: ${(e as Error).message}`);
   }
-  const html: string = await res.text();
+  const html = await res.text();
 
   if (res.status !== 200) {
     throw new BmsError("blocked", `HTTP ${res.status} (${html.length} bytes)`);
   }
 
-  // Distinguish "a real BookMyShow page that happens to list nothing" from "we were
-  // blocked / the page reshaped". Both are HTTP 200 with HTML, so size or a missing
-  // showtimes key alone cannot tell them apart — a Cloudflare block is ~5.5KB, while
-  // a genuine page for a date with no shows is ~118KB.
-  //
-  // __INITIAL_STATE__ is the app's own hydration payload: present on every real BMS
-  // page, absent from every block/challenge page. Identify the page positively first,
-  // THEN allow an empty result. This is not a fallback — an unidentified page still
-  // throws.
+  // Cloudflare blocks can return HTTP 200 HTML; window.__INITIAL_STATE__ is present
+  // on every real BMS app page and absent on every block/challenge page.
   if (!html.includes("window.__INITIAL_STATE__")) {
     throw new BmsError(
       "blocked",
       `not a BookMyShow app page (${html.length} bytes, no __INITIAL_STATE__) — blocked or reshaped`,
     );
   }
-  // A real event always titles its page "<Movie> Movie Showtimes in <City>".
-  // A nonexistent event code renders a page with no <title> at all. Verified against
-  // ET99999999 (no title) vs ET00000001 (an obscure old film — has a title, zero
-  // shows). So "no title" means the code is wrong, which is worth telling the user
-  // now rather than letting them wait forever for an alert that cannot come.
+  // A nonexistent event code (e.g. ET99999999) renders no <title>, whereas a valid
+  // film with zero shows still renders "<Movie> Movie Showtimes in <City>".
   const title = parseMovieTitle(html);
   if (!title) {
     throw new BmsError(
@@ -225,7 +230,20 @@ async function fetchPage(t: Target): Promise<{ title: string; html: string }> {
       `no movie found for ${t.eventCode} in ${t.city} — check the event code`,
     );
   }
-  return { title, html };
+  const posterUrl = parseMoviePoster(html);
+  return { title, html, ...(posterUrl ? { posterUrl } : {}) };
+}
+
+/** Extract a verified BookMyShow movie poster (`iedb/movies/images/`), never generic logos. */
+export function parseMoviePoster(html: string): string | undefined {
+  const match =
+    html.match(
+      /<meta\b[^>]*\bproperty=["']og:image["'][^>]*\bcontent=["'](https:\/\/[^"']*bmscdn\.com\/iedb\/movies\/images\/[^"']+)["']/i,
+    ) ??
+    html.match(
+      /<meta\b[^>]*\bcontent=["'](https:\/\/[^"']*bmscdn\.com\/iedb\/movies\/images\/[^"']+)["'][^>]*\bproperty=["']og:image["']/i,
+    );
+  return match?.[1];
 }
 
 /** "The Odyssey Movie Showtimes in Mumbai &amp; …" -> "The Odyssey" */
@@ -235,22 +253,65 @@ export function parseMovieTitle(html: string): string | null {
   const name = raw.split(/ Movie Showtimes/i)[0]!.trim();
   if (!name || name.length > 120) return null;
   return name
-    .replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'")
-    .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
 }
 
 const SESSION_RE =
-  /"additionalData":\{"sessionId":"(\d+)","availStatus":"(\d+)",[^}]*?"showDateCode":"(\d{8})","showDateTime":"(\d{12})","showTimeCode":"\d+","showTime":"([^"]+)","attributes":"([^"]*)"/g;
+  /"additionalData":\{"sessionId":"(\d+)","availStatus":"(\d+)",[^}]*?"showDateCode":"(\d{8})","showDateTime":"(\d{12})","showTimeCode":"\d+","showTime":"([^"]+)"(?:,"attributes":"([^"]*)")?/g;
+
+function parseBmsCategories(tail: string): TicketCategory[] | undefined {
+  const out: TicketCategory[] = [];
+  const block = tail.match(/"categories":\[((?:\{[^}]*\}|\s|,)*)\]/);
+  if (block) {
+    for (const obj of block[1]!.matchAll(/\{([^}]*)\}/g)) {
+      const raw = obj[1]!;
+      const name = raw.match(/"(?:priceDesc|categoryName|desc)":"([^"]+)"/)?.[1]?.trim() ?? "";
+      const priceStr = raw.match(/"(?:curPrice|maxPrice|price)":"?(\d+(?:\.\d+)?)"?/)?.[1];
+      const status = raw.match(/"availStatus":"(\d+)"/)?.[1] ?? "3";
+      const price = priceStr !== undefined ? Number(priceStr) : Number.NaN;
+      if (!name || !Number.isFinite(price) || price <= 0) continue;
+      out.push({ name, price, available: status === "0" ? 0 : 1 });
+    }
+    if (out.length) return out;
+  }
+
+  // Current BMS showtime bottomSheetData widgets embed per-tier prices as seatAvalibility/seatCost/seatType.
+  for (const m of tail.matchAll(
+    /"seatAvalibility":"([^"]+)","seatCost":"[^"]*?(\d+(?:\.\d+)?)","seatType":"([^"]+)"/g,
+  )) {
+    const avail = m[1]!.trim().toUpperCase();
+    const price = Number(m[2]);
+    const name = m[3]!.trim();
+    if (!name || !Number.isFinite(price) || price <= 0) continue;
+    if (!out.some((c) => c.name === name && c.price === price)) {
+      out.push({ name, price, available: avail === "SOLD OUT" ? 0 : 1 });
+    }
+  }
+  return out.length ? out : undefined;
+}
 
 function parseSessionsInSlice(slice: string, venueCode: string, venueName: string): Show[] {
   const out: Show[] = [];
-  for (const m of slice.matchAll(SESSION_RE)) {
+  const matches = [...slice.matchAll(SESSION_RE)];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i]!;
+    const availStatus = m[2]!;
+    // BMS availStatus "0" is Sold Out; skip so sold-out sessions never trigger live alerts.
+    if (availStatus === "0") continue;
+    const start = m.index! + m[0].length;
+    const end = i + 1 < matches.length ? matches[i + 1]!.index! : slice.length;
+    const ticketCategories = parseBmsCategories(slice.slice(start, end));
     out.push({
+      ...(ticketCategories ? { ticketCategories } : {}),
       sessionId: m[1]!,
-      availStatus: m[2]!,
+      availStatus,
       showDateCode: m[3]!,
       showTime: m[5]!,
-      attributes: m[6]!,
+      attributes: m[6] ?? "",
       epoch: istToEpoch(m[4]!),
       venueCode,
       venueName,
@@ -259,148 +320,125 @@ function parseSessionsInSlice(slice: string, venueCode: string, venueName: strin
   return out;
 }
 
-/** Exported for tests: the pure half of fetchShows. */
-export function parseShows(html: string): Show[] {
+function venueCardSlices(html: string): { slice: string; code: string; name: string }[] {
   const marker = '"type":"venue-card"';
-  const out: Show[] = [];
+  const cards: { slice: string; code: string; name: string }[] = [];
   let pos = 0;
-  let venueCards = 0;
-
   while (true) {
     const start = html.indexOf(marker, pos);
     if (start === -1) break;
-    venueCards++;
     const next = html.indexOf(marker, start + marker.length);
     const slice = next === -1 ? html.slice(start) : html.slice(start, next);
-    const venueCode = slice.match(/"venueCode":"([^"]+)"/)?.[1] ?? "";
-    const venueName = slice.match(/"venueName":"([^"]+)"/)?.[1] ?? "";
-    out.push(...parseSessionsInSlice(slice, venueCode, venueName));
+    cards.push({
+      slice,
+      code: slice.match(/"venueCode":"([^"]+)"/)?.[1] ?? "",
+      name: slice.match(/"venueName":"([^"]+)"/)?.[1] ?? "",
+    });
     pos = start + marker.length;
   }
+  return cards;
+}
 
+export function parseShows(html: string): Show[] {
+  const cards = venueCardSlices(html);
+  const out: Show[] = [];
+  for (const card of cards) {
+    out.push(...parseSessionsInSlice(card.slice, card.code, card.name));
+  }
   if (out.length > 0) return out;
-
-  const hasSessions = /"sessionId":"\d+"/.test(html);
-  if (html.includes("showtimesSections") && venueCards === 0 && hasSessions) {
+  if (html.includes("showtimesSections") && cards.length === 0 && /"sessionId":"\d+"/.test(html)) {
     throw new BmsError("unparseable", "showtimes page has sessions but no venue-cards");
   }
-
   return [];
 }
 
 export function parseVenues(html: string): { code: string; name: string }[] {
+  const cards = venueCardSlices(html);
+  if (cards.length === 0 && html.includes("showtimesSections") && /"sessionId":"\d+"/.test(html)) {
+    throw new BmsError("unparseable", "showtimes page has sessions but no venue-cards");
+  }
   const out: { code: string; name: string }[] = [];
   const seen = new Set<string>();
-  for (const s of parseShows(html)) {
-    if (!s.venueCode || seen.has(s.venueCode)) continue;
-    seen.add(s.venueCode);
-    out.push({ code: s.venueCode, name: s.venueName });
+  for (const card of cards) {
+    if (!card.code || seen.has(card.code) || !SESSION_RE.test(card.slice)) {
+      SESSION_RE.lastIndex = 0;
+      continue;
+    }
+    SESSION_RE.lastIndex = 0;
+    seen.add(card.code);
+    out.push({ code: card.code, name: card.name });
   }
   return out;
 }
 
 /**
- * A format selector on the buytickets page ("3D SCREEN X", "4DX", …). Each format
- * is a SEPARATE child event code — ScreenX shows never appear under the parent
- * event's `attributes`; they live on e.g. ET00502684. Format filters must resolve
- * these chips to know which child pages to check.
+ * Parse format-selector chips off a buytickets page ("3D SCREEN X", "IMAX 3D", …).
+ * When `eventCode` is provided and BMS stamps `language` on that parent chip, restrict
+ * returned chips to the same language so dubs (Hindi/Tamil/Telugu) do not cross-fire.
  */
-/**
- * Parse the format-selector chips off a buytickets page.
- *
- * Shape (measured 2026-08-10): {"type":"chip","title":"3D SCREEN X","cta":{"type":
- * "formatSelector","analytics":{...,"event_code":"ET00502684",...},"additionalData":
- * {...,"eventUrl":"spider-man-brand-new-day-3d-screen-x",...}}}
- */
-export function parseFormatChips(html: string): FormatChip[] {
-  const out: FormatChip[] = [];
+export function parseFormatChips(html: string, eventCode?: string): FormatChip[] {
+  const rawChips: (FormatChip & { language?: string })[] = [];
   const re =
-    /\{"type":"chip","title":"([^"]+)","cta":\{"type":"formatSelector","analytics":\{[^}]*"event_code":"(ET\d{6,})"[^}]*\},"additionalData":\{[^}]*"eventUrl":"([^"]+)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
+    /\{"type":"chip","title":"([^"]+)","cta":\{"type":"formatSelector","analytics":\{[^}]*"event_code":"(ET\d{6,})"[^}]*\},"additionalData":\{([^}]*)\}/g;
+  for (const m of html.matchAll(re)) {
     const title = m[1]!;
-    const eventCode = m[2]!;
-    const slug = m[3]!;
-    if (!out.some((c) => c.title === title && c.eventCode === eventCode)) {
-      out.push({ title, eventCode, slug });
+    const code = m[2]!;
+    const addl = m[3]!;
+    const slug = addl.match(/"eventUrl":"([^"]+)"/)?.[1];
+    if (!slug) continue;
+    const language = addl.match(/"language":"([^"]+)"/)?.[1];
+    if (!rawChips.some((c) => c.title === title && c.eventCode === code)) {
+      rawChips.push({ title, eventCode: code, slug, ...(language ? { language } : {}) });
     }
   }
-  return out;
+  const targetLang = eventCode
+    ? rawChips.find((c) => c.eventCode === eventCode)?.language
+    : undefined;
+  return rawChips
+    .filter((c) => !targetLang || !c.language || c.language === targetLang)
+    .map(({ title, eventCode: code, slug }) => ({ title, eventCode: code, slug }));
 }
 
 /**
- * A date BookMyShow will never have shows for. Used as a probe date.
- *
- * Why: the page carries a `dateCode` list of every bookable date — but BMS also
- * injects whatever date you asked for into that list, open or not. Asking for a real
- * date therefore contaminates the answer. Asking for an impossible one makes the
- * injected value identifiable, so it can be removed and the rest trusted.
- *
- * Verified 2026-07-27: probing with this returns exactly the sets found by scanning
- * eight days one request at a time — Odyssey {27,28,29 Jul}, Spider-Man
- * {30,31 Jul, 1,2 Aug}, AoT {28,29 Jul}. One request instead of eight.
+ * Impossible probe date: BMS injects whatever date was requested into the page's
+ * `dateCode` list even if closed, so probing `20991231` lets us strip the echo
+ * and read every genuinely open date in a single request.
  */
 export const PROBE_DATE = "20991231";
 
-/** Every date this movie is currently bookable for, in this city. One request.
- *  `venues` is null when venue-cards failed to parse — not the same as [].
- *  `chips` are the format-selector child events (ScreenX etc.), if parseable. */
-export async function fetchBookableDates(
-  t: Omit<Target, "date">,
-): Promise<{ title: string; dates: string[]; venues: { code: string; name: string }[] | null; chips: FormatChip[] }> {
-  const { title, html } = await fetchPage({ ...t, date: PROBE_DATE });
-  const dates = parseBookableDates(html);
+/** `venues` is null when venue-cards failed to parse — distinct from `[]`. */
+export async function fetchBookableDates(t: Omit<Target, "date">): Promise<{
+  title: string;
+  dates: string[];
+  venues: { code: string; name: string }[] | null;
+  chips: FormatChip[];
+  posterUrl?: string;
+}> {
+  const { title, html, posterUrl } = await fetchPage({ ...t, date: PROBE_DATE });
+  // Inactive sibling format chips can echo the shared movie date strip even when
+  // that child ET has zero shows on the page; require showtimesSections to trust dates.
+  const dates = html.includes("showtimesSections") ? parseBookableDates(html) : [];
   let venues: { code: string; name: string }[] | null = null;
   try {
     venues = parseVenues(html);
   } catch (e) {
     console.error(`[bms] venue parse failed for ${t.eventCode}/${t.city}:`, (e as Error).message);
   }
-  let chips: FormatChip[] = [];
-  try {
-    chips = parseFormatChips(html);
-  } catch (e) {
-    console.error(`[bms] chip parse failed for ${t.eventCode}/${t.city}:`, (e as Error).message);
-  }
-  return { title, dates, venues, chips };
+  const chips = parseFormatChips(html, t.eventCode);
+  return { title, dates, venues, chips, ...(posterUrl ? { posterUrl } : {}) };
 }
 
 /**
- * Per-cycle request coalescing.
- *
- * Every watch — dated or subscription — first asks the same question: which dates is
- * this movie bookable for in this city? That answer is keyed only by (city, event),
- * NOT by the watched date, so ten friends watching the same film collapse to one
- * HTTP request no matter which dates they each picked.
- *
- * Format-filtered watches also ask a second question per date (does THIS date have
- * matching shows, possibly on child format events) — that answer is keyed by
- * (city, event, date) and coalesced the same way, so N friends with the same filter
- * still cost one request per date instead of one per watch.
- *
- * The maps are rebuilt every cycle, so they are within-tick caches and can never
- * serve a stale answer across polls.
+ * When the probe date is closed on a coming-soon page, BMS falls back to TODAY
+ * as `additionalData.dateCode` (`"date-disabled"`, zero shows). Trust that
+ * page-default date only when a show on the page carries matching `showDateCode`.
  */
-type BookableDates = { title: string; dates: string[]; venues: { code: string; name: string }[] | null; chips: FormatChip[] };
-type Showtimes = { title: string; shows: Show[] };
-
-let cycle = new ReadCycle();
-export function beginCycle(): void { cycle = new ReadCycle(); }
-/** Requests saved by coalescing during the current cycle. */
-export const coalescedCount = () => cycle.hits;
-export function bookableDatesCached(t: Omit<Target, "date">): Promise<BookableDates> {
-  return cycle.once(`dates|${t.city}|${t.eventCode}`, () => fetchBookableDates(t));
-}
-/** fetchShowtimes coalesced per (city, event, date) within a cycle. */
-export function fetchShowtimesCached(t: Target): Promise<Showtimes> {
-  return cycle.once(`shows|${t.city}|${t.eventCode}|${t.date}`, () => fetchShowtimes(t));
-}
-
-/** Exported for tests: the pure half of fetchBookableDates. */
 export function parseBookableDates(html: string): string[] {
+  const pageDefault = html.match(/"additionalData":\{"dateCode":"(\d{8})","eventCode":/)?.[1];
   const dates = new Set<string>();
   for (const m of html.matchAll(/"dateCode":"(\d{8})"/g)) {
     if (m[1] !== PROBE_DATE) dates.add(m[1]!);
   }
+  if (pageDefault && !html.includes(`"showDateCode":"${pageDefault}"`)) dates.delete(pageDefault);
   return [...dates].sort();
 }

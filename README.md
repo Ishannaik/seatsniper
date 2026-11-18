@@ -5,7 +5,7 @@
 <h1 align="center">SeatSniper</h1>
 
 <p align="center">
-  <b>Watch any BookMyShow page. Get a Discord DM the second tickets go on sale.</b><br>
+  <b>Watch any BookMyShow or District page. Get a Discord DM the second tickets go on sale.</b><br>
   Self-host in one command. Bun + TypeScript + SQLite. No API keys, no credit card, no browser.
 </p>
 
@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/Ishannaik/seatsniper"></a>
   <a href=".github/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Ishannaik/seatsniper/ci.yml"></a>
   <a href="https://github.com/Ishannaik/seatsniper/labels/good%20first%20issue"><img alt="Good first issues" src="https://img.shields.io/github/labels/Ishannaik/seatsniper/good%20first%20issue"></a>
-  <img alt="Runtime: Bun 1.2" src="https://img.shields.io/badge/runtime-Bun%201.2-black">
+  <img alt="Runtime: Bun 1.4" src="https://img.shields.io/badge/runtime-Bun%201.4-black">
   <img alt="Language: TypeScript" src="https://img.shields.io/badge/language-TypeScript-3178C6">
   <img alt="discord.js v14" src="https://img.shields.io/badge/discord.js-v14-5865F2">
   <img alt="Storage: SQLite" src="https://img.shields.io/badge/storage-SQLite-003B57">
@@ -32,18 +32,22 @@
 
 ## TL;DR
 
-You tell it a BookMyShow link and a date. It polls the site, and the moment that
-date is bookable you get one DM. Say `date:any` instead and it pings you every
-time a *new* date unlocks or a *new* cinema starts showing the movie. Trim the
-noise with filters: `format:IMAX,4DX` only pings for those screens,
-`theatre:PVR,INOX` only for those cinemas, and `days:fri,sat` only on those
-weekdays. (`format:` filters date and showtime alerts; "new cinema appeared"
-alerts are not format-filtered, but they *are* theatre-filtered — see
+You paste a **BookMyShow** or **District** link and a date (`2026-07-30`, `today`,
+`tomorrow`, or `fri`). It polls the site, and the moment that date is bookable you get
+one DM. Leave `date:` out (or say `date:any`) and it pings you every time a *new* date
+unlocks or a *new* cinema/venue appears. Trim the noise with filters:
+`format:IMAX,PXL,4DX` only pings for those screens, `theatre:PVR,INOX` only for those
+cinemas or venues, `days:fri,sat` only on those weekdays, `after:18:00` / `before:23:00`
+(`6pm` / `11pm`) for an IST time window, `budget:500` for max INR ticket price on
+BookMyShow or District movies, and `seats:2` for public per-category seat counts on
+District movies. (On BookMyShow subscriptions, `format:` and `days:` filter date and
+showtime alerts while new-cinema alerts are theatre-filtered — see
 [Commands](#commands).)
 
-Works for movies, concerts, plays, any event BookMyShow lists in India.
+Works for movies and live events across BookMyShow and District in India.
 
-It observes and notifies. It never buys tickets, holds seats, or fills carts.
+It observes and notifies. It never logs into accounts, buys tickets, holds seats, or
+fills carts.
 
 ## Table of contents
 
@@ -55,7 +59,7 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 - [🧠 How it works](#how-it-works)
 - [⚙️ Configuration](#configuration)
 - [🗺️ Project layout](#project-layout)
-- [🧗 BookMyShow quirks](#bookmyshow-quirks)
+- [🧗 BookMyShow & District quirks](#bookmyshow-quirks)
 - [🤝 Contributing](#contributing)
 
 <a id="features"></a>
@@ -64,11 +68,13 @@ It observes and notifies. It never buys tickets, holds seats, or fills carts.
 
 | | |
 | --- | --- |
-| 📅 **Watch one date** | One DM the moment that date opens. The watch then deletes itself. No spam. |
-| 🎬 **Subscribe to a movie** | `date:any` = a DM every time a new date unlocks or a new cinema appears. |
-| 🎥 **Format, theatre + day filters** | Only ping for what you care about: `format:IMAX,4DX` matches by name (ScreenX spelling is flexible, e.g. `SCREENX` or `SCREEN X`), `theatre:PVR,INOX` by cinema name or venue code, `days:fri,sat` by weekday. All three filter date and showtime alerts; new-cinema alerts are theatre-filtered but not format-filtered. |
-| ✅ **Validates at creation** | The link is checked against the live site when you save it, so a broken watch fails immediately, not silently. |
-| ⚡ **One request per movie** | 50 watches on the same movie cost the same as 1. Coalesced polling keeps BookMyShow happy. |
+| 📅 **Watch one date** | Paste a date (`2026-07-30`, `today`, `tomorrow`, `fri`, `next fri`) and get one DM the moment it opens. The watch then deletes itself. |
+| 🎬 **Subscribe to a movie or event** | `date:any` (or no `date:`) = a DM every time a new date unlocks or a new cinema/venue appears across BookMyShow or District. |
+| 🎥 **Format, theatre, day + time filters** | `format:IMAX,PXL,4DX` matches screen formats (ScreenX spelling is flexible, e.g. `SCREENX` or `SCREEN X`), `theatre:PVR,INOX` matches cinema or venue names and codes, `days:fri,sat` filters weekdays, and `after:18:00` / `before:23:00` (`6pm` / `11pm`) restricts IST start times. |
+| 💺 **Price budget + District seat counts** | Optional `budget:500` filters BookMyShow and District movies by max listed INR price per seat before fees; `seats:2` (`1–10`) checks public per-category seat availability on District movies (seat adjacency is not checked). |
+| 🛑 **One-tap Stop + autocomplete** | Live autocomplete on `/watch` (`date`, `format`, `days`, `after`, `before`) and `/stop id:`, plus interactive **Stop** and **Stop all** buttons directly on `/list` and watch embeds. |
+| ✅ **Validates at creation** | Links (including mobile Share-sheet text and BMS movie synopsis URLs) are checked against the live provider before saving, so broken watches fail immediately. |
+| ⚡ **One request per listing** | 50 watches on the same movie or event share one coalesced fetch per poll cycle. |
 | 📱 **User-install commands** | Works in DMs and servers, installs straight to your account. |
 | 💾 **SQLite, zero config** | No database server, no Docker required. One file. |
 
@@ -98,7 +104,7 @@ DISCORD_TOKEN=... DISCORD_CLIENT_ID=... bash <(curl -fsSL https://raw.githubuser
 Then:
 
 1. Invite the bot with the URL the installer prints.
-2. In Discord, run `/watch` and paste a BookMyShow link.
+2. In Discord, run `/watch` and paste a BookMyShow or District link.
 3. Wait. The DM arrives when tickets go live.
 
 <a id="run-with-docker"></a>
@@ -115,26 +121,30 @@ docker compose up -d
 Docker users do not need to run `bun pm trust --all` manually; the image's
 dependency setup handles the required native dependency.
 
-The database lives in a named volume, so the bot survives container restarts.
+The database and cycle-liveness file live in a named `/data` volume owned by
+non-root `USER bun`, so watches survive container restarts.
 
-There is no HTTP healthcheck. `docker compose ps` showing "up" only means the
-process is running, not that the bot is logged in and polling. Configure
-`UPTIME_KUMA_PUSH_URL`; the bot pings it after each poll, so a missing push
-means polling stopped even if the container is still up.
+The container `HEALTHCHECK` inspects `last_cycle.json` (`LIVENESS_PATH`), verifying
+both that a poll tick completed recently and that the Discord gateway is connected
+(`gatewayReady`). For external alerting, configure `UPTIME_KUMA_PUSH_URL` (or run
+`infra/kuma-heartbeat.sh` on the host) so a stalled poller pages you immediately.
 
 <a id="manual-setup"></a>
 
 ## 📦 Manual setup
 
 ```bash
-bun install               # installs via bun.sh
+bun install               # installs via bun.sh (Bun >= 1.4.2; pin 1.4.2 on Linux)
 cp .env.example .env      # DISCORD_TOKEN, DISCORD_CLIENT_ID
 bun run commands          # register slash commands
 bun run start             # or: bun run dev for watch mode
 ```
 
 <details>
-<summary><b>Behind pm2</b></summary>
+<summary><b>Behind systemd or pm2</b></summary>
+
+A hardened `systemd --user` unit, `logrotate` config, and Uptime Kuma liveness
+script ship in [`infra/`](infra/) (see [`docs/ops.md`](docs/ops.md)). For `pm2`:
 
 ```bash
 pm2 start "$HOME/.bun/bin/bun" --name seatsniper --interpreter none --time -- run src/index.ts
@@ -150,30 +160,36 @@ Bun auto-loads `.env` from the working directory.
 
 | Command | What it does |
 | --- | --- |
-| `/watch link:<url> date:YYYY-MM-DD` | DM once when that date opens, then delete the watch |
-| `/watch link:<url> date:any` | Subscribe. DM when a new date or cinema appears |
-| `/watch link:<url> format:IMAX,4DX theatre:PVR,INOX days:fri,sat after:18:00 before:23:00` | Optional filters on any watch. Ping only for these formats, cinemas, weekdays, or start times. `after:`/`before:` are IST wall clock, 24-hour (`18:00`) or 12-hour (`6:00 PM`); `before:` is exclusive and the window cannot wrap past midnight |
-| `/list` | Show your active watches |
-| `/stop id:<n>` | Stop watch `n` from `/list` |
-| `/help` | How the bot works |
+| `/watch link:<url> date:<when>` | Watch one date (`2026-07-30`, `today`, `tomorrow`, `fri`, `next fri`) on BookMyShow or District; DM once when it opens, then delete the watch |
+| `/watch link:<url> date:any` | Subscribe (or omit `date:` when the link has no date). DM when a new date or cinema/venue appears |
+| `/watch link:<url> format:IMAX,PXL,4DX theatre:PVR,INOX days:fri,sat after:18:00 before:23:00` | Optional filters on any watch (`date`, `format`, `days`, `after`, and `before` all support autocomplete). `after:`/`before:` are IST wall clock in 24-hour (`18:00`) or 12-hour (`6:00 PM`, `6pm`) format; `before:` is exclusive and the window cannot wrap past midnight (cinema `format:` does not apply to District events) |
+| `/watch link:<movie-url> budget:500 seats:2` | Optional movie price & seat filters: `budget:` caps listed INR price per seat before fees on **BookMyShow and District** movies; `seats:` (`1–10`) requires that many seats available in one ticket category on **District** movies (adjacency is not checked) |
+| `/list` | Show your active watches with direct links and interactive **Stop `#id`** / **Stop all** buttons |
+| `/stop id:<n>` / `/stop all:true` | Stop one watch (with live autocomplete of your active watches) or stop all active watches |
+| `/help` | Quick reference inside Discord |
+
+Supported links (mobile Share-sheet text around the URL is stripped automatically):
+- **BookMyShow:** `https://in.bookmyshow.com/<city>/movies/<movie>/ET…` or `https://in.bookmyshow.com/movies/<city>/<movie>/buytickets/ET…`
+- **District movies:** `https://www.district.in/movies/<movie>-movie-tickets-in-<city>-MV…` (`m.district.in` also works)
+- **District events:** `https://www.district.in/events/<event>-buy-tickets` (shortlinks like `bmsurl.co` / `link.district.in` and dining links are rejected with a clear hint)
 
 > **What `format:` does and does not cover.** A subscription (`date:any`) can alert
 > on two different things: a **new date** opening, and a **new cinema** starting to
-> list the film. `format:` is enforced on the new-date half — the bot re-fetches
-> showtimes for each fresh date and drops the ones with no matching show. It is
-> **not** enforced on the new-cinema half: fresh venues are detected by venue code
-> alone, so a new cinema listing the film in any format still produces a DM. The
-> filter line on that DM reflects the filters you set, not a format that was checked
-> for the cinema. `days:` behaves the same way — it applies to dates, and a cinema is
-> not a date.
+> list the film. On BookMyShow, `format:` is enforced on the new-date half — the bot
+> re-fetches showtimes (and matching format-selector child events) for each fresh date
+> and drops the ones with no matching show. It is **not** enforced on BookMyShow's
+> new-cinema half: fresh venues are detected by venue code from the probe response, so
+> a new cinema listing the film in any format still produces a DM. `days:` behaves the
+> same way there — it applies to dates, and a cinema is not a date. (District
+> subscriptions already inspect per-date sessions, so fresh District cinemas also
+> respect active show filters.)
 >
-> **`theatre:` is the exception** — it *is* enforced on the new-cinema half. A fresh
-> venue already carries its name and code from the same response the diff is computed
-> from, so filtering it costs no extra request and needs none of the coalescing the
-> format check does. `theatre:PVR` therefore stays silent when an INOX starts listing
-> the film. It matches case-insensitively as a substring of the cinema name *or* its
-> venue code, so `theatre:PVR` catches "PVR: Phoenix Palladium" and `theatre:IMOB`
-> works if you'd rather paste a code.
+> **`theatre:` is always enforced on new-cinema alerts.** A fresh venue already
+> carries its name and code from the same response the diff is computed from, so
+> `theatre:PVR` stays silent when an INOX starts listing the film. It matches
+> case-insensitively as a substring of the cinema/venue name *or* its venue code, so
+> `theatre:PVR` catches "PVR: Phoenix Palladium" and `theatre:IMOB` works if you'd
+> rather paste a code.
 
 Each user can hold up to 5 watches.
 
@@ -181,17 +197,21 @@ Each user can hold up to 5 watches.
 
 ## 🧠 How it works
 
-1. **Save.** `/watch` parses the link, then hits BookMyShow once to confirm the
-   movie exists. Bad links fail here, not days later.
+1. **Save.** `/watch` parses the BookMyShow or District link, checks for an existing
+   duplicate watch immediately, and queries the live site once to confirm the movie or
+   event exists. Bad links fail here, not days later.
 2. **Poll.** Every `POLL_INTERVAL_SEC` (default 600 s) the bot checks each
-   watch. Watches on the same movie share one request.
-3. **Detect.** Availability comes from the `showDateCode` on each show.
-   BookMyShow silently serves the nearest bookable date when the one you asked
-   for is closed, so the URL, the HTTP status, and the page header all lie. The
-   per-show field does not.
+   watch. Watches on the same listing share one coalesced request per cycle.
+3. **Detect.** On BookMyShow, availability comes from `showDateCode` on each non-sold-out
+   show (plus matching child format events when `format:` is set) — BookMyShow silently
+   serves the nearest bookable date when the requested one is closed, so the URL, HTTP
+   status, and page header all lie while the per-show field does not. On District,
+   movies are verified from public `__NEXT_DATA__` SSR state across all language groups,
+   and events are verified from Next.js Flight data only when live `general_sale` +
+   `BOOK_TICKETS` inventory is open.
 4. **Notify.** A dated watch DMs you once, then removes itself. A subscription
-   compares today's dates and cinemas against what it has seen before and DMs
-   the difference.
+   compares today's dates and cinemas/venues against what it has seen before and DMs
+   the difference, with direct public links and one-tap **Stop** controls.
 
 Failure is never silence. A blocked or unparseable response throws and logs;
 after 3 consecutive failures the bot tells you, so a dead poller cannot sit
@@ -199,16 +219,17 @@ quietly forever.
 
 ### Request coalescing
 
-Within one poll cycle, the bot keeps a map keyed by movie (city + event).
-`bookableDatesCached` returns the cached BookMyShow response when the same movie
-is watched again, so 50 watches on one film cost roughly one request per cycle.
-`beginCycle()` clears that map at the start of every poll so an answer is never
-served across cycles.
+Within one poll cycle, `ReadCycle` (`src/read-cycle.ts`) keeps a promise map keyed
+by provider, city, and event code (`src/providers.ts`), evicting rejected promises so
+transient network blips do not poison later watches. `bookableDatesCached` and
+`fetchShowtimesCached` reuse in-flight or completed fetches within the tick, so 50
+watches on one film cost roughly one request per cycle. `beginCycle()` resets that
+map at the start of every poll so an answer is never served across cycles.
 
-Format filters are intentionally the exception for subscription watches: each
-fresh date requires an additional showtimes request. Dated watches already have
-their showtimes and apply the format filter in memory. This is a deliberate
-tradeoff, not a bug.
+Format and show-level filters on BookMyShow subscriptions require an extra showtimes
+request per fresh date (coalesced across watches sharing that movie and date). Dated
+watches check `bookableDatesCached` first and only fetch showtimes once the date is
+open.
 
 Coalescing reduces request volume on whatever egress you run. It is not a
 substitute for suitable egress: BookMyShow checks the TLS fingerprint, and
@@ -227,8 +248,9 @@ its geographic restrictions can still block datacenter IPs outside India.
 | `STAGGER_MS_MIN` | no | `2000` | Shortest pause between two watches inside one cycle |
 | `STAGGER_MS_MAX` | no | `5000` | Longest pause between two watches inside one cycle |
 | `DB_PATH` | no | `seatsniper.db` | SQLite file location |
-| `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll |
-| `BMS_TLS_PROFILE` | no | `safari_ios_18_0` | `node-tls-client` profile for the BookMyShow session. Rotate only between **Safari/Firefox** profiles if Cloudflare starts blocking (see [BookMyShow quirks](#bookmyshow-quirks)). Chrome profiles are rejected, not merely discouraged. An unknown or unsupported name fails at startup. |
+| `LIVENESS_PATH` | no | `<dir(DB_PATH)>/last_cycle.json` | Atomic JSON liveness snapshot written after each poll cycle for Docker `HEALTHCHECK` and host supervision |
+| `UPTIME_KUMA_PUSH_URL` | no | | Uptime Kuma push URL; the bot pings it after each poll (and reports `down` if the Discord gateway disconnects) |
+| `BMS_TLS_PROFILE` | no | `safari_ios_17_0` | `node-tls-client` profile for the BookMyShow session. Rotate only between **Safari/Firefox** profiles if Cloudflare starts blocking (see [BookMyShow & District quirks](#bookmyshow-quirks)). Chrome profiles are rejected, not merely discouraged. An unknown or unsupported name fails at startup. |
 
 Keep `POLL_INTERVAL_SEC` at or above 120-300 seconds for personal use. Faster
 polls do **not** require a residential IP; they increase request volume and
@@ -253,29 +275,57 @@ giving a fixed delay, rather than being silently swapped.
 
 ```
 src/
-  index.ts        bot, poll loop, slash handlers
-  bms.ts          BookMyShow client, URL parsing, availability
-  db.ts           SQLite: watches, seen dates, seen venues
-  messages.ts     Discord copy and embeds
-  stagger.ts      inter-watch stagger config (STAGGER_MS_MIN / STAGGER_MS_MAX)
-  register.ts     slash command registration
-  time-filter.ts  IST after/before time filter parser and show matcher
-assets/            logo
+  index.ts                bot, poll loop, slash & button handlers, liveness
+  commands.ts             slash command schemas and live autocomplete
+  register.ts             slash command registration
+  db.ts                   SQLite WAL: watches, seen dates, seen venues
+  providers.ts            BookMyShow + District router and cycle cache
+  read-cycle.ts           per-poll promise coalescing
+  movie-model.ts          shared Show, TicketCategory, Target, FormatChip types
+  provider-error.ts       typed provider errors (BmsError)
+  bms.ts                  BookMyShow client, TLS session, tiers, format chips
+  district.ts             District movie client and SSR parser
+  district-events.ts      District event client and Flight parser
+  filters.ts              format, theatre, and weekday filters + suggestions
+  time-filter.ts          natural IST dates and after/before time windows
+  booking-preferences.ts  movie price budget and District seat-count filters
+  messages.ts             Discord copy, embeds, link & Stop buttons
+  stagger.ts              inter-watch stagger config (STAGGER_MS_MIN / STAGGER_MS_MAX)
+scripts/
+  quality.ts              architecture, file-length, cycle & hygiene gate
+  deadcode.ts             unused file, export, and dependency check
+  gen-agents-modules.ts   AGENTS.md module-table sync
+infra/
+  systemd/                hardened systemd --user service unit
+  logrotate/              logrotate policy for VPS logs
+  kuma-heartbeat.sh       host liveness push script reading last_cycle.json
+assets/                   logo and README preview
 docs/
-  ops.md          self-hosting operations notes
-  releasing.md    release checklist: version bump, changelog, tag
-  superpowers/    design specs and measured findings
+  architecture.md         subsystem boundaries and dataflow
+  ops.md                  self-hosting operations and VPS runbook
+  releasing.md            release checklist: version bump, changelog, tag
+  superpowers/            design specs and measured findings
 ```
+
+See [`docs/architecture.md`](docs/architecture.md) for how the subsystems fit together
+and [`docs/ops.md`](docs/ops.md) for production deployment and supervision.
 
 <a id="bookmyshow-quirks"></a>
 
-## 🧗 BookMyShow quirks
+## 🧗 BookMyShow & District quirks
 
-- **Geo-fenced.** Datacenter IPs outside India can be blocked. A home server in
-  India is the safest host. The bot speaks Safari's TLS fingerprint via
-  `node-tls-client`, which passes BookMyShow's Cloudflare checks.
-- **No heuristics.** Availability is a field comparison, not a scrape-and-guess.
-  The measured findings behind this live in
+- **BookMyShow is geo-fenced and TLS-scored.** Datacenter IPs outside India can be
+  blocked. A home server or India VPS is the safest host. The bot speaks Safari's TLS
+  fingerprint via `node-tls-client`, which passes BookMyShow's Cloudflare checks, and
+  resolves child `formatSelector` chips because formats like `ScreenX` and `IMAX`
+  often live on separate `ET…` event codes.
+- **District uses SSR + Flight state.** District movies expose sessions (including
+  `extraSessions`), language groups, and category seat/price counts in `__NEXT_DATA__`;
+  District events stream state via Next.js Flight chunks where RSVP/preregistration
+  pages also report `available`, so SeatSniper waits for an active unrestricted
+  `general_sale` with `BOOK_TICKETS`.
+- **No heuristics.** Availability is an exact schema and field comparison, never a
+  keyword guess. Measured BookMyShow findings live in
   [`docs/superpowers/specs/2026-07-27-bms-access-findings.md`](docs/superpowers/specs/2026-07-27-bms-access-findings.md).
 
 ## 🔧 Troubleshooting
@@ -283,10 +333,10 @@ docs/
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `bun install` / TLS lib missing | Bun blocks trusted deps | `bun pm trust --all` |
-| HTTP 403 from BookMyShow | Chrome profile, bare curl, or wrong headers | Use the Safari profile only; read the [measured findings](docs/superpowers/specs/2026-07-27-bms-access-findings.md) |
+| HTTP 403 from BookMyShow | Chrome profile, bare curl, or wrong headers | Use a Safari/Firefox profile only; read the [measured findings](docs/superpowers/specs/2026-07-27-bms-access-findings.md) |
 | "Need residential proxy?" | Prior-art myth | **No** for Safari TLS on a capable host; a measured Oracle datacenter works |
 | Slash commands missing | Global vs guild registration | Set `DISCORD_GUILD_ID` for instant guild commands |
-| DMs never arrive | User closed DMs | The bot falls back to a channel; open DMs with the bot |
+| DMs never arrive | User closed DMs | The bot falls back to the origin guild channel; open DMs with the bot |
 | Integration tests fail in CI | Live BookMyShow from US runners | Keep `integration.ts` manual and not part of CI |
 
 ## ⚠️ Limitations & hosting
@@ -297,8 +347,9 @@ docs/
 - **SeatSniper is observe-only.** It never buys or holds tickets, by design.
 
 When it will break: Cloudflare may harden the Safari handshake, an abused IP
-can lose reputation even with a valid profile, and a BookMyShow HTML reshape
-can surface as a `BmsError` or as silence until the parser is updated.
+can lose reputation even with a valid profile, and a BookMyShow or District
+HTML/SSR reshape will surface loudly as a `BmsError` until the parser is
+updated.
 
 <a id="contributing"></a>
 
@@ -306,9 +357,10 @@ can surface as a `BmsError` or as silence until the parser is updated.
 
 Bug reports, feature ideas, and PRs are welcome. Start with
 [CONTRIBUTING.md](CONTRIBUTING.md), which covers the setup and the hard
-constraints the bot was built around. Report security issues privately, see
-[SECURITY.md](SECURITY.md). New contributors can start at the
-[good first issues](https://github.com/Ishannaik/seatsniper/labels/good%20first%20issue)
+constraints the bot was built around, and run `bun run check` (`typecheck`,
+`lint`, `quality`, `deadcode`, and `test`) before opening a PR. Report security
+issues privately, see [SECURITY.md](SECURITY.md). New contributors can start at
+the [good first issues](https://github.com/Ishannaik/seatsniper/labels/good%20first%20issue)
 label.
 
 ## Community
@@ -328,29 +380,3 @@ it.**
 <p align="center">
   <sub>Observes and notifies only. Never buys tickets. Made for the Friday 9 AM rush.</sub>
 </p>
-
-
-## District support and private Discord DM watches
-
-SeatSniper now includes District movie and event monitoring alongside BookMyShow,
-with provider-aware persistence, filtering and explicit error handling. The
-optional Discord DM entry point lets each user manage private movie watches:
-
-```text
-watch <movie link> date:2026-12-18 time:18:30 theatre:"Oberoi Mall" format:PXL
-list
-stop 1
-stop all
-help
-```
-
-Each account gets its own filters, five-watch limit, persistent state and private
-alerts. A matching-show alert completes that watch. Times are IST. Date is
-required unless in the URL; time, theatre and format are optional. Checks run
-every 30 seconds with automatic backoff. Watch commands do not hold or pay.
-
-See [setup and privacy details](docs/discord-dm-watches.md) to run the optional
-`src/doomsday-cloud.ts` entry point instead of the original slash-command bot.
-Legacy hard-coded monitoring is disabled by default. Optional District booking
-and voice integrations remain restricted to the configured owner and require
-separate confirmations for booking actions. Never share tokens or runtime state.

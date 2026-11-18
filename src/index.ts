@@ -1,529 +1,438 @@
-/** SeatSniper — paste a BookMyShow link, get a DM when that date opens. */
-import { Client, GatewayIntentBits, MessageFlags, type ChatInputCommandInteraction } from "discord.js";
-import { handleDistrictBooking } from "./district-booking-discord.ts";
-import { matchesBookingPreferences, validateBookingPreferences, type BookingPreferences } from "./booking-preferences.ts";
+/** SeatSniper — paste a BookMyShow or District link, get a DM when that date opens. */
+import { renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import {
+  type ButtonInteraction,
+  type ChatInputCommandInteraction,
+  Client,
+  Events,
+  GatewayIntentBits,
+  MessageFlags,
+  Options,
+  Status,
+} from "discord.js";
+import { commandSuggestions } from "./commands.ts";
+import {
+  addSubscription,
+  addWatch,
+  allWatches,
+  closeDb,
+  countWatches,
+  DB_PATH,
+  findWatch,
+  getWatchById,
+  listWatches,
+  MAX_WATCHES_PER_USER,
+  type NewWatch,
+  removeAllWatches,
+  removeWatch,
+  SUBSCRIPTION,
+  type Watch,
+} from "./db.ts";
+import {
+  filterMatchingShows,
+  filterSummary,
+  hasShowLevelFilter,
+  type NormalizedWatchFilters,
+  parseWatchFilters,
+} from "./filters.ts";
 import * as msg from "./messages.ts";
 import {
-  isDistrictEvent, providerName, fetchShowtimes, fetchShowtimesCached, fetchBookableDates, bookableDatesCached, beginCycle,
-  coalescedCount, parseWatchUrl, showsOnDate, showtimesUrl, prettyDate, BmsError, PROBE_DATE,
-  type FormatChip, type Show, type Target,
+  checkWatch,
+  type DeliveryOutcome,
+  expireStale,
+  type MessagePayload,
+  qualifySubscriptionDates,
+} from "./poller.ts";
+import {
+  type BmsError,
+  beginCycle,
+  closeProviders,
+  coalescedCount,
+  discoverListing,
+  type FormatChip,
+  initProviders,
+  isDistrictEvent,
+  parseWatchUrl,
+  providerName,
+  providerOf,
+  resolveTargetCity,
+  type Show,
+  showsForListing,
+  showtimesUrl,
+  type Target,
 } from "./providers.ts";
-import { fetchDistrictEvent } from "./district-events.ts";
-import { initBms, closeBms } from "./bms.ts";
-import {
-  addWatch, listWatches, allWatches, countWatches, removeWatch, markOk, markFail,
-  seenDates, recordSeenDates, seenVenues, recordSeenVenues, shouldSilentSeedVenues,
-  isSubscription, SUBSCRIPTION, MAX_WATCHES_PER_USER, type Watch,
-} from "./db.ts";
-import { parseTimeFilter, matchesTimeFilter, todayIST } from "./time-filter.ts";
-import {
-  normaliseFormats, normaliseDays, matchesFormat,
-  matchesDay, matchesTheatre, normaliseTheatres, filterSummary,
-} from "./filters.ts";
-import { commandSuggestions } from "./commands.ts";
 import { staggerBounds, staggerDelayMs } from "./stagger.ts";
-import { normaliseDate } from "./date.ts";
+import { parseDateInput, prettyDate, todayIST } from "./time-filter.ts";
 
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) throw new Error("DISCORD_TOKEN missing — copy .env.example to .env");
 
 const POLL_MS = Number(process.env.POLL_INTERVAL_SEC ?? 600) * 1000;
-if (!Number.isFinite(POLL_MS) || POLL_MS < 1000) throw new Error("POLL_INTERVAL_SEC must be at least 1 second");
+if (!Number.isFinite(POLL_MS) || POLL_MS < 1000) {
+  throw new Error("POLL_INTERVAL_SEC must be at least 1 second");
+}
 
 const STAGGER = staggerBounds();
-
-/** Optional Uptime Kuma Push URL. Bot pings it after each poll so Kuma can alert if we die. */
 const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL?.trim() || "";
+const LIVENESS_PATH =
+  process.env.LIVENESS_PATH?.trim() || join(dirname(DB_PATH), "last_cycle.json");
 
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+  makeCache: Options.cacheWithLimits({
+    MessageManager: 0,
+    PresenceManager: 0,
+    ReactionManager: 0,
+    GuildMemberManager: 0,
+    UserManager: 50,
+  }),
+});
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+type ListingIdentity = {
+  provider?: "bms" | "district";
+  city: string;
+  slug: string;
+  eventCode: string;
+};
 
-// ---------------------------------------------------------------- child format events
-//
-// The buytickets page carries format-selector chips that map format names to
-// SEPARATE child event codes — ScreenX/IMAX/4DX showtimes live under those child
-// events, not under the parent event's `attributes`. A filtered watch must check
-// the parent AND every matching child event before deciding a date has shows.
-
-type MovieRef = Pick<Watch, "provider" | "city" | "slug" | "event_code">;
-
-function chipTarget(chip: FormatChip, city: string, date: string): Target {
-  return { city, slug: chip.slug, eventCode: chip.eventCode, date };
-}
-
-/** Distinct matching formats, in first-seen order. */
-function collectFormats(shows: Show[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const s of shows) {
-    if (s.attributes && !seen.has(s.attributes)) {
-      seen.add(s.attributes);
-      out.push(s.attributes);
-    }
-  }
-  return out;
-}
-
-/**
- * All shows on `date` (parent event + matching child format events) that satisfy
- * the filter. Child checks are best-effort: a failing child event must not sink
- * the parent's answer, and it retries next poll.
- */
-async function matchingShows(
-  movie: MovieRef,
-  date: string,
-  filter: string,
-  chips: FormatChip[],
-): Promise<{ shows: Show[]; formats: string[] }> {
-  const parent = { provider: movie.provider, city: movie.city, slug: movie.slug, eventCode: movie.event_code, date };
-  const shows = showsOnDate((await fetchShowtimesCached(parent)).shows, date)
-    .filter((s) => matchesFormat(s.attributes, filter));
-
-  for (const chip of chipsMatchingFilter(chips, filter)) {
-    try {
-      const child = showsOnDate((await fetchShowtimesCached(chipTarget(chip, movie.city, date))).shows, date)
-        .filter((s) => matchesFormat(s.attributes, filter));
-      shows.push(...child);
-    } catch (e) {
-      console.error(`[${movie.event_code}] ${chip.title} check failed for ${date}:`, (e as Error).message);
-    }
-  }
-  return { shows, formats: collectFormats(shows) };
-}
-
-/** The format-selector chips (child events) whose title matches the filter. */
-function chipsMatchingFilter(chips: FormatChip[], filter: string): FormatChip[] {
-  return chips.filter((c) => matchesFormat(c.title, filter));
-}
-
-// ---------------------------------------------------------------- commands
-
-async function cmdWatch(i: ChatInputCommandInteraction) {
-  await i.deferReply({ flags: MessageFlags.Ephemeral });
-
-  const bookingPrefs: BookingPreferences = { seat_count: i.options.getInteger("seats"), seat_budget: i.options.getNumber("budget") };
-  try { validateBookingPreferences(bookingPrefs); } catch (e) { return void i.editReply(`❌ ${(e as Error).message}`); }
-  let target: Target;
-  const formatFilter = normaliseFormats(i.options.getString("format"));
-
-  // Reject an unreadable filter instead of silently dropping it: a watch that quietly
-  // ignores "days: wknd" or "after 18:00" still fires and looks broken.
-  const daysRaw = i.options.getString("days")?.trim() || null;
-  const dayFilter = normaliseDays(daysRaw);
-  if (daysRaw !== null && dayFilter === null) {
-    return void i.editReply(
-      `❌ I couldn't read \`days: ${daysRaw}\` — use short weekday names like \`fri,sat,sun\`.`,
-    );
-  }
-
-  const afterRaw = i.options.getString("after")?.trim() || null;
-  const beforeRaw = i.options.getString("before")?.trim() || null;
-  const afterMinutes = afterRaw === null ? null : parseTimeFilter(afterRaw);
-  const beforeMinutes = beforeRaw === null ? null : parseTimeFilter(beforeRaw);
-  if (afterRaw !== null && afterMinutes === null) {
-    return void i.editReply(`❌ I couldn't read \`after: ${afterRaw}\` as a time. Use 24-hour \`18:00\` or \`6:00 PM\`.`);
-  }
-  if (beforeRaw !== null && beforeMinutes === null) {
-    return void i.editReply(`❌ I couldn't read \`before: ${beforeRaw}\` as a time. Use 24-hour \`12:00\` or \`11:30 AM\`.`);
-  }
-  // An empty window can never match, so say so now rather than watching forever in silence.
-  if (afterMinutes !== null && beforeMinutes !== null && afterMinutes >= beforeMinutes) {
-    return void i.editReply(
-      `❌ \`after: ${afterRaw}\` is not before \`before: ${beforeRaw}\`, so no show could ever match. ` +
-        "The window does not wrap past midnight.",
-    );
-  }
-  const afterFilter = afterRaw;
-  const beforeFilter = beforeRaw;
-
-  const theatreFilter = normaliseTheatres(i.options.getString("theatre"));
-  try {
-    const parsed = parseWatchUrl(i.options.getString("link", true));
-    if ((bookingPrefs.seat_count != null || bookingPrefs.seat_budget != null) && (parsed.provider !== "district" || isDistrictEvent(parsed))) return void i.editReply("Seat count and budget alerts currently support District movies only; public category data is required.");
-    if (isDistrictEvent(parsed)) {
-      if (formatFilter) return void i.editReply("District events don't have cinema formats. Leave format empty; day, time and venue filters are supported.");
-      parsed.city = (await fetchDistrictEvent(parsed)).city;
-    }
-    const dateOpt = i.options.getString("date")?.trim();
-    // "any" (or a link with no date and no date option) subscribes to the movie:
-    // ping me every time a NEW date unlocks, rather than watching one date.
-    const wantsAny = dateOpt ? /^(any|all|every|new)$/i.test(dateOpt) : !parsed.date;
-    if (wantsAny) return void (await subscribeToMovie(i, parsed, formatFilter, dayFilter, afterFilter, beforeFilter, theatreFilter, bookingPrefs));
-
-    const date = normaliseDate(dateOpt || parsed.date!);
-    if (date < todayIST()) {
-      return void i.editReply(
-        `❌ ${prettyDate(date)} has already passed — a watch for it could never fire.`,
-      );
-    }
-    target = { provider: parsed.provider, city: parsed.city, slug: parsed.slug, eventCode: parsed.eventCode, date };
-  } catch (e) {
-    return void i.editReply(`❌ ${(e as Error).message}`);
-  }
-
-  if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
-    return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
-  }
-
-  // Validate against the live site now, so a broken watch fails here rather than
-  // silently never firing. Costs one request; saves days of false silence.
-  let open, title;
-  try {
-    const res = await fetchShowtimes(target);
-    title = res.title; // BookMyShow's own name for it, not a guess from the slug
-    open = showsOnDate(res.shows, target.date).filter((sh) =>
-      (!formatFilter || matchesFormat(sh.attributes, formatFilter)) &&
-      (!dayFilter || matchesDay(sh.showDateCode, dayFilter)) &&
-      (!theatreFilter || matchesTheatre(sh.venueName, sh.venueCode, theatreFilter)) &&
-      matchesTimeFilter(sh.epoch, afterMinutes, beforeMinutes) && matchesBookingPreferences(sh, bookingPrefs));
-  } catch (e) {
-    const err = e as BmsError;
-    if (err.kind === "not_found") {
-      return void i.editReply(
-        `❌ No movie found for \`${target.eventCode}\` in ${target.city}. ` +
-          "Check the link — the city and the event code have to match.",
-      );
-    }
-    return void i.editReply(
-      `⚠️ Can't reach ${providerName(target)} right now, so I won't save a watch I can't check.\n\`${err.message}\``,
-    );
-  }
-
-  if (open.length) {
-    return void i.editReply(
-      msg.alreadyOnSale({ title, city: target.city, date: target.date, shows: open, url: showtimesUrl(target) }),
-    );
-  }
-
-  const id = addWatch({
-    user_id: i.user.id, channel_id: i.channelId, ...bookingPrefs, provider: target.provider, city: target.city, slug: target.slug,
-    event_code: target.eventCode, date: target.date, title,
-    format_filter: formatFilter, day_filter: dayFilter,
-    after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter,
+function duplicatePayload(existing: Watch, requestedFilters: string | null) {
+  return msg.duplicateWatch({
+    id: existing.id,
+    title: existing.title,
+    date: existing.date,
+    currentFilters: filterSummary(existing),
+    requestedFilters,
   });
-  if (id === null) return void i.editReply("You're already watching that movie and date. `/list` to see it.");
+}
 
-  await i.editReply(
-    msg.armedForDate({ title, city: target.city, date: target.date, everyMin: POLL_MS / 60000, filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter, ...bookingPrefs }) }),
+async function guardDuplicateOrCap(
+  i: ChatInputCommandInteraction,
+  listing: ListingIdentity,
+  date: string,
+  requestedSummary: string | null,
+): Promise<boolean> {
+  const existing = findWatch(i.user.id, providerOf(listing), listing.city, listing.eventCode, date);
+  if (existing) {
+    await i.editReply(duplicatePayload(existing, requestedSummary));
+    return true;
+  }
+  if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
+    await i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
+    return true;
+  }
+  return false;
+}
+
+function providerErrorText(listing: ListingIdentity, err: BmsError): string {
+  if (err.kind === "not_found") {
+    return (
+      `❌ No movie found for \`${listing.eventCode}\` in ${listing.city}. ` +
+      "Check the link — the city and the event code have to match."
+    );
+  }
+  return (
+    `⚠️ Can't reach ${providerName(listing)} right now, so I won't save a watch I can't check.\n` +
+    `\`${err.message}\``
   );
 }
 
-/**
- * Subscribe to a movie rather than a single date. Whatever is bookable right now
- * becomes the baseline — the user already knows about those — and every date that
- * appears afterwards gets a DM. With a format filter, only dates that currently
- * have matching shows are baselined; the rest stay armed so they fire the day a
- * matching show appears on them.
- */
-async function subscribeToMovie(
+function buildNewWatch(
   i: ChatInputCommandInteraction,
-  parsed: { provider?: "bms" | "district"; city: string; slug: string; eventCode: string },
-  formatFilter: string | null,
-  dayFilter: string | null,
-  afterFilter: string | null,
-  beforeFilter: string | null,
-  theatreFilter: string | null,
-  bookingPrefs: BookingPreferences,
-) {
-  if (countWatches(i.user.id) >= MAX_WATCHES_PER_USER) {
-    return void i.editReply(`You're at ${MAX_WATCHES_PER_USER} watches. \`/stop\` one first.`);
-  }
+  listing: ListingIdentity,
+  date: string,
+  title: string,
+  f: NormalizedWatchFilters,
+): NewWatch {
+  return {
+    user_id: i.user.id,
+    channel_id: i.channelId,
+    provider: listing.provider,
+    city: listing.city,
+    slug: listing.slug,
+    event_code: listing.eventCode,
+    date,
+    title,
+    ...f,
+  };
+}
 
-  let title, dates, venues, chips;
-  try {
-    ({ title, dates, venues, chips } = await fetchBookableDates(parsed));
-  } catch (e) {
-    const err = e as BmsError;
-    if (err.kind === "not_found") {
-      return void i.editReply(
-        `❌ No movie found for \`${parsed.eventCode}\` in ${parsed.city}. Check the link.`,
-      );
-    }
-    return void i.editReply(
-      `⚠️ Can't reach ${providerName(parsed)} right now, so I won't save a watch I can't check.\n\`${err.message}\``,
-    );
+async function replyRaceDuplicate(
+  i: ChatInputCommandInteraction,
+  listing: ListingIdentity,
+  date: string,
+  requestedSummary: string | null,
+  fallback: string,
+): Promise<void> {
+  const existing = findWatch(i.user.id, providerOf(listing), listing.city, listing.eventCode, date);
+  if (existing) {
+    await i.editReply(duplicatePayload(existing, requestedSummary));
+    return;
   }
+  await i.editReply(fallback);
+}
 
-  // With a format filter, baseline only the dates that already have matching shows
-  // (parent or child format event). Dates without them must stay unseeded so a
-  // later unlock still fires. Validation hits are per-date and fresh — never served
-  // from the poll cycle cache.
-  let baseline: string[] = dates;
-  let matchingNow: string[] = [];
-  if (parsed.provider === "district" || formatFilter || dayFilter || theatreFilter || afterFilter || beforeFilter) {
-    const matched: string[] = [];
-    for (const d of dates) {
-      const target = { provider: parsed.provider, city: parsed.city, slug: parsed.slug, eventCode: parsed.eventCode, date: d };
-      try {
-        const shows = showsOnDate((await fetchShowtimes(target)).shows, d)
-          .filter((s) => (!formatFilter || matchesFormat(s.attributes, formatFilter)) &&
-            (!dayFilter || matchesDay(d, dayFilter)) &&
-            (!theatreFilter || matchesTheatre(s.venueName, s.venueCode, theatreFilter)) &&
-            matchesTimeFilter(s.epoch, parseTimeFilter(afterFilter ?? ""), parseTimeFilter(beforeFilter ?? "")));
-        for (const chip of (formatFilter ? chipsMatchingFilter(chips, formatFilter) : [])) {
-          const child = showsOnDate((await fetchShowtimes(chipTarget(chip, parsed.city, d))).shows, d)
-            .filter((s) => matchesFormat(s.attributes, formatFilter!));
-          shows.push(...child);
-        }
-        if (shows.some((sh) => (!dayFilter || matchesDay(d, dayFilter)) &&
-            (!theatreFilter || matchesTheatre(sh.venueName, sh.venueCode, theatreFilter)) &&
-            matchesTimeFilter(sh.epoch, parseTimeFilter(afterFilter ?? ""), parseTimeFilter(beforeFilter ?? "")) && matchesBookingPreferences(sh, bookingPrefs))) matched.push(d);
-      } catch (e) {
-        // Uncheckable date at creation — treat as not-yet-matching so it stays armed.
-        console.error(`[sub] format validation failed for ${d}:`, (e as Error).message);
-      }
-    }
-    baseline = matched;
-    matchingNow = matched;
-  }
+async function cmdWatch(i: ChatInputCommandInteraction): Promise<void> {
+  await i.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const id = addWatch({
-    user_id: i.user.id, channel_id: i.channelId, ...bookingPrefs, provider: parsed.provider, city: parsed.city, slug: parsed.slug,
-    event_code: parsed.eventCode, date: SUBSCRIPTION, title,
-    format_filter: formatFilter, day_filter: dayFilter,
-    after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter,
+  const filterResult = parseWatchFilters({
+    format: i.options.getString("format"),
+    days: i.options.getString("days"),
+    after: i.options.getString("after"),
+    before: i.options.getString("before"),
+    theatre: i.options.getString("theatre"),
+    seats: i.options.getInteger("seats"),
+    budget: i.options.getNumber("budget"),
   });
-  if (id === null) return void i.editReply("You're already subscribed to that movie. `/list` to see it.");
+  if (!filterResult.ok) return void (await i.editReply(filterResult.error));
+  const { filters: f, summary } = filterResult;
 
-  recordSeenDates(id, baseline); // baseline: today's matching dates are not "new"
-  if (venues) recordSeenVenues(id, venues.map((v) => v.code));
+  let target: Target;
+  try {
+    const parsed = parseWatchUrl(i.options.getString("link", true));
+    if (isDistrictEvent(parsed) && (f.seat_count != null || f.seat_budget != null)) {
+      return void (await i.editReply(
+        "Seat count and budget alerts apply to movies only; District events don't expose cinema seat tiers.",
+      ));
+    }
+    if (f.seat_count != null && parsed.provider !== "district") {
+      return void (await i.editReply(
+        "Exact seat-count alerts (`seats:`) currently support District movies only — BookMyShow only publishes tier prices, so use `budget:` without `seats:`.",
+      ));
+    }
+    if (isDistrictEvent(parsed) && f.format_filter) {
+      return void (await i.editReply(
+        "District events don't have cinema formats. Leave format empty; day, time and venue filters are supported.",
+      ));
+    }
+    parsed.city = await resolveTargetCity(parsed);
+
+    const dateOpt = i.options.getString("date")?.trim();
+    const resolvedDate = dateOpt
+      ? parseDateInput(dateOpt)
+      : parsed.date
+        ? parseDateInput(parsed.date)
+        : "any";
+
+    if (resolvedDate === "any") {
+      return void (await subscribeToMovie(i, parsed, f, summary));
+    }
+    if (resolvedDate < todayIST()) {
+      return void (await i.editReply(
+        `❌ ${prettyDate(resolvedDate)} has already passed — a watch for it could never fire.`,
+      ));
+    }
+    target = {
+      provider: parsed.provider,
+      city: parsed.city,
+      slug: parsed.slug,
+      eventCode: parsed.eventCode,
+      date: resolvedDate,
+    };
+  } catch (e) {
+    return void (await i.editReply(`❌ ${(e as Error).message}`));
+  }
+
+  if (await guardDuplicateOrCap(i, target, target.date, summary)) return;
+
+  let open: Show[];
+  let title: string;
+  let posterUrl: string | undefined;
+  try {
+    const res = await showsForListing(target, f.format_filter);
+    title = res.title;
+    posterUrl = res.posterUrl;
+    open = filterMatchingShows(res.shows, f, { checkDay: true });
+  } catch (e) {
+    return void (await i.editReply(providerErrorText(target, e as BmsError)));
+  }
+
+  const url = showtimesUrl(target);
+  if (open.length) {
+    return void (await i.editReply(
+      msg.alreadyOnSale({
+        title,
+        city: target.city,
+        date: target.date,
+        shows: open,
+        url,
+        posterUrl,
+      }),
+    ));
+  }
+
+  const id = addWatch(buildNewWatch(i, target, target.date, title, f));
+  if (id === null) {
+    return void (await replyRaceDuplicate(
+      i,
+      target,
+      target.date,
+      summary,
+      "You're already watching that movie and date. `/list` to see it.",
+    ));
+  }
 
   await i.editReply(
+    msg.armedForDate({
+      title,
+      city: target.city,
+      date: target.date,
+      everyMin: Math.round(POLL_MS / 60000),
+      filters: summary,
+      watchId: id,
+      url,
+      posterUrl,
+    }),
+  );
+}
+
+async function subscribeToMovie(
+  i: ChatInputCommandInteraction,
+  parsed: ListingIdentity,
+  f: NormalizedWatchFilters,
+  summary: string | null,
+): Promise<void> {
+  if (await guardDuplicateOrCap(i, parsed, SUBSCRIPTION, summary)) return;
+
+  let title: string;
+  let dates: string[];
+  let venues: { code: string; name: string }[] | null;
+  let chips: FormatChip[];
+  let posterUrl: string | undefined;
+  let baseline: string[];
+  try {
+    ({ title, dates, venues, chips, posterUrl } = await discoverListing(parsed, f.format_filter));
+    baseline = (
+      await qualifySubscriptionDates(parsed, dates, f, chips, showsForListing, {
+        logPrefix: "[sub]",
+      })
+    ).dates;
+  } catch (e) {
+    return void (await i.editReply(providerErrorText(parsed, e as BmsError)));
+  }
+
+  const id = addSubscription(
+    buildNewWatch(i, parsed, SUBSCRIPTION, title, f),
+    baseline,
+    venues ? venues.map((v) => v.code) : null,
+  );
+  if (id === null) {
+    return void (await replyRaceDuplicate(
+      i,
+      parsed,
+      SUBSCRIPTION,
+      summary,
+      "You're already subscribed to that movie. `/list` to see it.",
+    ));
+  }
+
+  const isFiltered = hasShowLevelFilter(parsed.provider, f) || Boolean(f.day_filter);
+  await i.editReply(
     msg.armedForMovie({
-      title, city: parsed.city, openNow: (parsed.provider === "district" || formatFilter || dayFilter || theatreFilter || afterFilter || beforeFilter) ? matchingNow : dates, everyMin: POLL_MS / 60000,
-      filters: filterSummary({ format_filter: formatFilter, day_filter: dayFilter, after_filter: afterFilter, before_filter: beforeFilter, theatre_filter: theatreFilter, ...bookingPrefs }),
+      title,
+      city: parsed.city,
+      openNow: isFiltered ? baseline : dates,
+      totalOpenDates: dates.length,
+      filters: summary,
       isEvent: isDistrictEvent(parsed),
+      watchId: id,
+      url: showtimesUrl({ ...parsed, date: dates[0] ?? todayIST() }),
+      posterUrl,
       warning:
-        formatFilter && !matchingNow.length
-          ? `_No ${formatFilter} shows exist for this movie right now — I'll ping you the moment one appears._`
+        f.format_filter && !baseline.length
+          ? `_No ${f.format_filter} shows exist for this movie right now — I'll ping you the moment one appears._`
           : null,
     }),
   );
 }
 
-async function cmdList(i: ChatInputCommandInteraction) {
-  const rows = listWatches(i.user.id);
+async function cmdList(i: ChatInputCommandInteraction): Promise<void> {
+  const today = todayIST();
+  const rows = listWatches(i.user.id).map((w) => ({
+    ...w,
+    url: showtimesUrl({
+      provider: w.provider,
+      city: w.city,
+      slug: w.slug,
+      eventCode: w.event_code,
+      date: w.date || today,
+    }),
+  }));
   if (!rows.length) {
-    return void i.reply({
+    return void (await i.reply({
       content: "Nothing being watched yet. `/help` shows how to start one.",
       flags: MessageFlags.Ephemeral,
-    });
+    }));
   }
   await i.reply({ ...msg.watchList(rows), flags: MessageFlags.Ephemeral });
 }
 
-async function cmdStop(i: ChatInputCommandInteraction) {
-  const id = i.options.getInteger("id", true);
-  const ok = removeWatch(id, i.user.id);
+async function cmdStop(i: ChatInputCommandInteraction): Promise<void> {
+  if (i.options.getBoolean("all")) {
+    const content = msg.stoppedAllText(removeAllWatches(i.user.id));
+    return void (await i.reply({ content, flags: MessageFlags.Ephemeral }));
+  }
+
+  const id = i.options.getInteger("id");
+  if (id === null) {
+    return void (await i.reply({
+      content: "Pick a watch `id:` to stop, or pass `all: true` to stop every watch.",
+      flags: MessageFlags.Ephemeral,
+    }));
+  }
+
+  const existing = getWatchById(id);
+  if (!existing || existing.user_id !== i.user.id || !removeWatch(id, i.user.id)) {
+    return void (await i.reply({
+      content: `No watch #${id} of yours.`,
+      flags: MessageFlags.Ephemeral,
+    }));
+  }
+
   await i.reply({
-    content: ok ? `Stopped watch #${id}.` : `No watch #${id} of yours.`,
+    content: `Stopped watching **${existing.title}** (#${id}).`,
     flags: MessageFlags.Ephemeral,
   });
 }
 
-// ---------------------------------------------------------------- poller
-
-/** Subscription poll: announce dates and cinemas that weren't bookable last time we looked. */
-async function checkSubscription(w: Watch) {
-  let dates: string[];
-  let venues: { code: string; name: string }[] | null;
-  let chips: FormatChip[] = [];
-  try {
-    ({ dates, venues, chips } = await bookableDatesCached({
-      provider: w.provider, city: w.city, slug: w.slug, eventCode: w.event_code,
-    }));
-  } catch (e) {
-    markFail(w.id, (e as Error).message);
-    if (w.fail_count + 1 === 3) await dm(w, failEmbed(w, e as Error));
+async function handleStopButton(i: ButtonInteraction): Promise<void> {
+  if (i.customId === msg.STOP_ALL_CUSTOM_ID) {
+    const content = msg.stoppedAllText(removeAllWatches(i.user.id));
+    await i.reply({ content, flags: MessageFlags.Ephemeral });
     return;
   }
-  if (w.provider !== "district") markOk(w.id);
 
-  // null venues = parse failed; skip cinema diff (don't treat as "no cinemas").
-  //
-  // NOTE: fresh venues are diffed by venue code only — format_filter and day_filter are
-  // NOT applied here, unlike the freshDates path below. A new cinema listing the film in
-  // any format still alerts, and the DM's filter line reflects the watch's filters rather
-  // than a format checked for the cinema. Documented in the README Commands section.
-  // Filtering this half needs showtimes-or-attributes per venue plus careful coalescing,
-  // so it is a deliberate gap rather than an oversight (see issue #21).
-  //
-  // theatre_filter IS applied here: the venue's name and code are already in hand, so
-  // it costs no extra request and needs none of the coalescing above.
-  let freshVenues: { code: string; name: string }[] = [];
-  if (venues) {
-    if (!isDistrictEvent(w) && shouldSilentSeedVenues(w.id)) {
-      recordSeenVenues(w.id, venues.map((v) => v.code));
-    } else {
-      const known = new Set(seenVenues(w.id));
-      freshVenues = venues.filter((v) => !known.has(v.code));
-      if (w.theatre_filter) freshVenues = freshVenues.filter((v) => matchesTheatre(v.name, v.code, w.theatre_filter!));
-    }
+  const id = Number(i.customId.slice(msg.STOP_BUTTON_PREFIX.length));
+  if (!Number.isInteger(id) || id < 1) {
+    await i.reply({ content: "Invalid watch ID.", flags: MessageFlags.Ephemeral });
+    return;
   }
 
-  if (w.provider === "district" && freshVenues.length) {
-    const qualified = new Set<string>();
-    for (const d of dates) {
-      if (w.day_filter && !matchesDay(d, w.day_filter)) continue;
-      const shows = showsOnDate((await fetchShowtimesCached({ provider: w.provider, city: w.city, slug: w.slug, eventCode: w.event_code, date: d })).shows, d);
-      for (const sh of shows) {
-        if ((!w.format_filter || matchesFormat(sh.attributes, w.format_filter)) &&
-            (!w.theatre_filter || matchesTheatre(sh.venueName, sh.venueCode, w.theatre_filter)) &&
-            matchesTimeFilter(sh.epoch, parseTimeFilter(w.after_filter ?? ""), parseTimeFilter(w.before_filter ?? "")) && matchesBookingPreferences(sh, w)) qualified.add(sh.venueCode);
-      }
-    }
-    freshVenues = freshVenues.filter((v) => qualified.has(v.code));
+  const existing = getWatchById(id);
+  if (!existing) {
+    await i.reply({
+      content: `Watch #${id} is no longer active.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (existing.user_id !== i.user.id) {
+    await i.reply({ content: "That watch isn't yours.", flags: MessageFlags.Ephemeral });
+    return;
   }
 
-  const knownDates = new Set(seenDates(w.id));
-  let freshDates = dates.filter((d) => !knownDates.has(d));
-
-  // Apply day filter to fresh dates before announcing.
-  if (w.day_filter) freshDates = freshDates.filter((d) => matchesDay(d, w.day_filter!));
-
-  // Format, time-of-day and theatre filters: only announce dates that actually have a
-  // matching show — on the parent event OR a matching child format event (ScreenX etc.).
-  // Costs an extra fetchShowtimes per fresh date — spent only when one of those filters
-  // is set, and coalesced so N watches on the same movie share the request. A date alone
-  // says nothing about start times or venues, so all three share a single pass.
-  const matchedShows: Show[] = [];
-  let matchedFormats: string[] = [];
-  const afterMinutes = w.after_filter ? parseTimeFilter(w.after_filter) : null;
-  const beforeMinutes = w.before_filter ? parseTimeFilter(w.before_filter) : null;
-  const needsShowtimes = w.provider === "district" || Boolean(w.format_filter) || Boolean(w.theatre_filter) || afterMinutes !== null || beforeMinutes !== null;
-  if (needsShowtimes && freshDates.length) {
-    const kept: string[] = [];
-    for (const d of freshDates) {
-      try {
-        let shows: Show[];
-        if (w.format_filter) {
-          shows = (await matchingShows(w, d, w.format_filter, chips)).shows;
-        } else {
-          shows = showsOnDate((await fetchShowtimesCached({ provider: w.provider, city: w.city, slug: w.slug, eventCode: w.event_code, date: d })).shows, d);
-        }
-        const hits = shows.filter(
-          (sh) =>
-            (!w.theatre_filter || matchesTheatre(sh.venueName, sh.venueCode, w.theatre_filter)) &&
-            matchesTimeFilter(sh.epoch, afterMinutes, beforeMinutes) && matchesBookingPreferences(sh, w),
-        );
-        if (hits.length) {
-          kept.push(d);
-          matchedShows.push(...hits);
-          if (w.format_filter) {
-            for (const h of hits) if (h.attributes && !matchedFormats.includes(h.attributes)) matchedFormats.push(h.attributes);
-          }
-        } else if (w.format_filter) {
-          console.log(`[watch ${w.id}] ${d} filtered out: no ${w.format_filter} shows`);
-        }
-      } catch (e) {
-        // Uncheckable date — log it and retry next poll rather than silently skipping.
-        if (w.provider === "district") throw e;
-        console.error(`[watch ${w.id}] format check failed for ${d}:`, (e as Error).message);
-      }
-    }
-    freshDates = kept;
-  }
-
-  if (w.provider === "district") markOk(w.id);
-  if (!freshDates.length && !freshVenues.length) return;
-
-  const url = showtimesUrl({
-    provider: w.provider, city: w.city,
-    slug: w.slug,
-    eventCode: w.event_code,
-    date: freshDates[0] ?? dates[0] ?? PROBE_DATE,
+  removeWatch(id, i.user.id);
+  await i.reply({
+    content: `Stopped watching **${existing.title}** (#${id}).`,
+    flags: MessageFlags.Ephemeral,
   });
-
-  // Only mark these announced once they actually reached the user. Recording first
-  // would lose the alert permanently if delivery failed.
-  const outcome = await dm(w, msg.subscriptionAlert({
-    title: w.title, city: w.city, dates: freshDates, venues: freshVenues, url,
-    filters: filterSummary(w), matchedFormats, shows: matchedShows, isEvent: isDistrictEvent(w),
-  }));
-  if (outcome !== "failed") {
-    if (freshDates.length) recordSeenDates(w.id, freshDates);
-    if (freshVenues.length) recordSeenVenues(w.id, freshVenues.map((v) => v.code));
-  } else {
-    console.error(`[watch ${w.id}] undelivered, will retry`);
-  }
 }
-
-async function checkWatch(w: Watch) {
-  if (isSubscription(w)) {
-    try { await checkSubscription(w); }
-    catch (e) {
-      markFail(w.id, (e as Error).message);
-      if (w.fail_count + 1 === 3) await dm(w, failEmbed(w, e as Error));
-    }
-    return;
-  }
-  const target = { provider: w.provider, city: w.city, slug: w.slug, eventCode: w.event_code, date: w.date };
-  let open;
-  let chips: FormatChip[] = [];
-  try {
-    // Ask the shared, coalesced question first: which dates are bookable at all?
-    // Verified equivalent to matching showDateCode (checked across 3 films x 8 days),
-    // and it lets every watch on this movie share one request regardless of date.
-    const res = await bookableDatesCached(target);
-    chips = res.chips;
-    if (!res.dates.includes(w.date)) {
-      markOk(w.id);
-      return;
-    }
-    // It's open — only now spend a second request to get the actual showtimes.
-    open = showsOnDate((await fetchShowtimesCached(target)).shows, w.date);
-  } catch (e) {
-    markFail(w.id, (e as Error).message);
-    // One warning at exactly 3 consecutive failures: enough to rule out a blip,
-    // and never repeated so a persistent outage can't spam the user.
-    if (w.fail_count + 1 === 3) await dm(w, failEmbed(w, e as Error));
-    return;
-  }
-  markOk(w.id);
-  if (!open.length) return;
-
-  // Apply user filters: only fire if shows match the requested format/day.
-  // Format matching consults child events first, then day/time/theatre so a
-  // ScreenX hit cannot overwrite an earlier day constraint.
-  let filtered = open;
-  let matchedFormats: string[] = [];
-  if (w.format_filter) {
-    // Filtered one-shots must also consult matching child format events —
-    // ScreenX shows live under a child event, so the parent's shows alone lie.
-    const { shows, formats } = await matchingShows(w, w.date, w.format_filter, chips);
-    filtered = shows;
-    matchedFormats = formats;
-  }
-  if (w.day_filter) filtered = filtered.filter((s) => matchesDay(s.showDateCode, w.day_filter!));
-  if (w.after_filter || w.before_filter) {
-    filtered = filtered.filter((s) =>
-      matchesTimeFilter(s.epoch, parseTimeFilter(w.after_filter ?? ""), parseTimeFilter(w.before_filter ?? "")));
-  }
-  if (w.theatre_filter) filtered = filtered.filter((s) => matchesTheatre(s.venueName, s.venueCode, w.theatre_filter!));
-  filtered = filtered.filter((sh) => matchesBookingPreferences(sh, w));
-  if (!filtered.length) return; // shows exist but none match — stay silent, keep watching
-
-  // Same rule: a watch is only "done its job" once the user was actually told.
-  const outcome = await dm(w, msg.ticketsLive({
-    title: w.title, city: w.city, date: w.date, shows: filtered, url: showtimesUrl(target),
-    filters: filterSummary(w), matchedFormats,
-  }));
-  if (outcome !== "failed") removeWatch(w.id, w.user_id);
-  else console.error(`[watch ${w.id}] undelivered, keeping watch alive to retry`);
-}
-
-const failEmbed = (w: Watch, e: Error) => msg.cannotRead({ title: w.title, error: e.message, provider: providerName(w) });
-
-/** Where a notification actually landed. */
-type DeliveryOutcome = "dm" | "channel_fallback" | "failed";
 
 /**
- * DM the owner; fall back to the origin channel *and say so*. Never silent.
- * Returns where the message landed — callers must not retire a watch or mark a
- * date as announced unless it was "dm" or "channel_fallback", or the alert is
- * lost forever. Logs every delivery so "who got what" is answerable from the log.
+ * DM the owner; fall back to the origin guild channel *and say so*. Callers must not
+ * retire a watch or mark dates announced on `"failed"` or the alert is lost forever.
  */
-async function dm(w: Watch, payload: { embeds: unknown[]; components?: unknown[] }): Promise<DeliveryOutcome> {
+async function dm(w: Watch, payload: MessagePayload): Promise<DeliveryOutcome> {
   try {
     const user = await client.users.fetch(w.user_id);
     await user.send(payload as never);
@@ -533,12 +442,18 @@ async function dm(w: Watch, payload: { embeds: unknown[]; components?: unknown[]
     console.warn(`[watch ${w.id}] DM to ${w.user_id} failed: ${(e as Error).message}`);
     try {
       const ch = await client.channels.fetch(w.channel_id);
+      if (ch?.isDMBased?.()) {
+        console.warn(`[watch ${w.id}] channel ${w.channel_id} is DM-based; skipping fallback`);
+        return "failed";
+      }
       if (ch?.isTextBased() && "send" in ch) {
         await ch.send({
           content: `<@${w.user_id}> — your DMs are closed, so this is going here instead.`,
           ...(payload as never as object),
         });
-        console.log(`[watch ${w.id}] delivered to user ${w.user_id} via channel ${w.channel_id} (fallback)`);
+        console.log(
+          `[watch ${w.id}] delivered to user ${w.user_id} via channel ${w.channel_id} (fallback)`,
+        );
         return "channel_fallback";
       }
       console.error(`[watch ${w.id}] channel ${w.channel_id} is not sendable`);
@@ -549,113 +464,156 @@ async function dm(w: Watch, payload: { embeds: unknown[]; components?: unknown[]
   }
 }
 
-
-/**
- * A watch whose date has passed can never fire — BookMyShow stops listing the date
- * entirely and silently serves the next bookable one, so the watch would poll
- * forever finding nothing. Retire it and say so, rather than leaving it to rot.
- */
-async function expireStale(w: Watch): Promise<boolean> {
-  if (isSubscription(w) || w.date >= todayIST()) return false;
-  await dm(w, msg.watchExpired({ title: w.title, date: w.date }));
-  removeWatch(w.id, w.user_id);
-  console.log(`[poll] expired watch ${w.id} (${w.date} < ${todayIST()})`);
-  return true;
+function writeLivenessSnapshot(watchesCount: number, elapsedMs: number, coalesced: number): void {
+  try {
+    const gatewayReady = client.ws ? client.ws.status === Status.Ready : true;
+    const payload = JSON.stringify({
+      ok: gatewayReady,
+      ts: Date.now(),
+      sec: Math.round(elapsedMs / 1000),
+      watches: watchesCount,
+      coalesced,
+      gatewayReady,
+    });
+    const tmp = `${LIVENESS_PATH}.${process.pid}.tmp`;
+    writeFileSync(tmp, payload, "utf8");
+    renameSync(tmp, LIVENESS_PATH);
+  } catch {}
 }
 
-/**
- * Tell Uptime Kuma we're still alive. Fire-and-forget — a dead Pi must not
- * break the poll loop. Only called after a poll tick finishes so a hung bot
- * stops heartbeating and Kuma goes red.
- */
 async function heartbeatUptime(note: string, pingMs?: number): Promise<void> {
   if (!UPTIME_KUMA_PUSH_URL) return;
   try {
     const url = new URL(UPTIME_KUMA_PUSH_URL);
-    if (!url.searchParams.has("status")) url.searchParams.set("status", "up");
-    url.searchParams.set("msg", note);
-    if (pingMs != null) url.searchParams.set("ping", String(Math.max(0, Math.round(pingMs))));
+    const wsReady = client.ws ? client.ws.status === Status.Ready : true;
+    if (!wsReady) {
+      url.searchParams.set("status", "down");
+      url.searchParams.set("msg", "gateway_disconnected");
+    } else {
+      if (!url.searchParams.has("status")) url.searchParams.set("status", "up");
+      url.searchParams.set("msg", note);
+      if (pingMs != null) url.searchParams.set("ping", String(Math.max(0, Math.round(pingMs))));
+    }
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    await res.body?.cancel().catch(() => {});
     if (!res.ok) console.warn(`[uptime] push HTTP ${res.status}`);
   } catch (e) {
     console.warn(`[uptime] push failed: ${(e as Error).message}`);
   }
 }
 
-async function poll() {
+let shuttingDown = false;
+let pollTimer: ReturnType<typeof setTimeout> | undefined;
+let activePoll: Promise<void> | null = null;
+
+async function poll(): Promise<void> {
   const watches = allWatches();
   const started = Date.now();
   if (!watches.length) {
-    // Still heartbeat when idle — empty watch list is not "bot is dead".
+    writeLivenessSnapshot(0, 0, 0);
     await heartbeatUptime("idle");
     return;
   }
-  beginCycle(); // fresh coalescing map; never serves an answer across polls
+  beginCycle();
   for (const w of watches) {
+    if (shuttingDown) break;
     try {
-      if (!(await expireStale(w))) {
-        await checkWatch(w);
+      if (!(await expireStale(w, dm))) {
+        await checkWatch(w, dm);
       }
     } catch (e) {
-      // A watch can disappear while a poll is in flight. One stale snapshot must
-      // not abort the rest of the cycle. Reachable since PRAGMA foreign_keys=ON:
-      // a /stop between the allWatches() snapshot and a ledger write now throws
-      // FOREIGN KEY constraint failed where it used to insert an orphan row.
-      // Log the raw value, not `(e as Error).message`. The cast is compile-time only, so a
-      // thrown null or undefined would make the handler itself throw and abort the cycle,
-      // which is the exact failure this guard exists to prevent.
       console.error(`[watch ${w.id}] poll failed:`, e);
     }
-    // Stagger so we never burst. Cheap insurance against looking automated.
-    // Tunable via STAGGER_MS_MIN / STAGGER_MS_MAX; defaults are the previous 2000-5000ms.
+    if (shuttingDown) break;
     await Bun.sleep(staggerDelayMs(STAGGER));
   }
+  if (shuttingDown) return;
   const elapsed = Date.now() - started;
   const saved = coalescedCount();
   console.log(
     `[poll] ${watches.length} watch(es) in ${Math.round(elapsed / 1000)}s` +
       (saved ? ` · ${saved} request(s) saved by coalescing` : ""),
   );
+  writeLivenessSnapshot(watches.length, elapsed, saved);
   await heartbeatUptime(`${watches.length} watches`, elapsed);
 }
 
-// ---------------------------------------------------------------- wire-up
-
-client.on("interactionCreate", async (i) => {
-  if (await handleDistrictBooking(i)) return;
-  // Autocomplete for /watch format + days options.
+client.on(Events.InteractionCreate, async (i) => {
   if (i.isAutocomplete()) {
-    return void i.respond(commandSuggestions("classic", i.commandName, i.options.getFocused(true))).catch(() => {});
+    const context = i.commandName === "stop" ? { watches: listWatches(i.user.id) } : undefined;
+    return void i
+      .respond(commandSuggestions(i.commandName, i.options.getFocused(true), context))
+      .catch(() => {});
+  }
+  if (i.isButton()) {
+    if (!i.customId.startsWith(msg.STOP_BUTTON_PREFIX)) return;
+    try {
+      await handleStopButton(i);
+    } catch (e) {
+      console.error("button interaction failed:", e);
+    }
+    return;
   }
   if (!i.isChatInputCommand()) return;
   try {
-    if (i.commandName === "help") await i.reply({ ...msg.help(), flags: MessageFlags.Ephemeral });
-    else if (i.commandName === "watch") await cmdWatch(i);
-    else if (i.commandName === "list") await cmdList(i);
-    else if (i.commandName === "stop") await cmdStop(i);
+    if (i.commandName === "help") {
+      await i.reply({
+        ...msg.help({
+          everyMin: Math.max(1, Math.round(POLL_MS / 60000)),
+          maxWatches: MAX_WATCHES_PER_USER,
+        }),
+        flags: MessageFlags.Ephemeral,
+      });
+    } else if (i.commandName === "watch") {
+      await cmdWatch(i);
+    } else if (i.commandName === "list") {
+      await cmdList(i);
+    } else if (i.commandName === "stop") {
+      await cmdStop(i);
+    }
   } catch (e) {
     console.error("command failed:", e);
-    const msg = { content: `Something broke: \`${(e as Error).message}\``, flags: MessageFlags.Ephemeral } as const;
-    await (i.deferred || i.replied ? i.editReply(msg.content) : i.reply(msg)).catch(() => {});
+    const errPayload = {
+      content: `Something broke: \`${(e as Error).message}\``,
+      flags: MessageFlags.Ephemeral,
+    } as const;
+    await (i.deferred || i.replied ? i.editReply(errPayload.content) : i.reply(errPayload)).catch(
+      () => {},
+    );
   }
 });
 
-client.once("clientReady", (c) => {
+client.once(Events.ClientReady, (c) => {
   console.log(`SeatSniper online as ${c.user.tag}`);
   const tick = async () => {
-    try { await poll(); } catch (e) { console.error(e); }
-    setTimeout(() => void tick(), POLL_MS);
+    if (shuttingDown) return;
+    const run = poll().catch((e) => console.error(e));
+    activePoll = run;
+    await run;
+    activePoll = null;
+    if (!shuttingDown) {
+      pollTimer = setTimeout(() => void tick(), POLL_MS);
+    }
   };
   void tick();
 });
 
-await initBms();
+await initProviders();
 await client.login(TOKEN);
 
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (pollTimer !== undefined) clearTimeout(pollTimer);
+  if (activePoll) {
+    await Promise.race([activePoll, Bun.sleep(10_000)]);
+  }
+  await closeProviders();
+  await Promise.race([client.destroy(), Bun.sleep(3_000)]);
+  closeDb();
+  process.exit(0);
+}
+
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
-  process.on(sig, async () => {
-    await closeBms();
-    await client.destroy();
-    process.exit(0);
-  });
+  process.on(sig, () => void shutdown());
 }

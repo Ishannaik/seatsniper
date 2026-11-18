@@ -1,9 +1,10 @@
 # Security Policy
 
-SeatSniper observes a ticketing site and sends notifications. It never buys
-tickets, holds seats, or automates checkout. Issues that matter here are leaks
-of Discord tokens or database contents, and anything that lets the bot act
-beyond reading public showtimes.
+SeatSniper observes public ticketing pages (BookMyShow and District) and sends
+Discord notifications. It never logs into ticketing accounts, buys tickets,
+holds seats, or automates checkout. Issues that matter here are leaks of Discord
+tokens or database contents, and anything that lets the bot act beyond reading
+public showtimes and event listings.
 
 ## Reporting a vulnerability
 
@@ -20,21 +21,7 @@ Do not open a public issue that exposes a live Discord token.
 
 - `DISCORD_TOKEN` and `DISCORD_CLIENT_ID` must stay out of the repository and
   the image. Never commit a `.env` file.
-- The database file holds Discord user IDs and BookMyShow event codes. Treat
-  `seatsniper.db` as private.
-- The bot only sends what BookMyShow already serves publicly. A bug here is a
-  wrong notification, not an unauthorized purchase.
-
-
-## Personal District booking
-
-The optional `/book` integration uses District's official authenticated connector.
-It can place real holds and initiate payments after the configured owner confirms
-District's exact summaries. Report unintended writes, cross-user account access,
-confirmation replay and duplicate payment attempts as security issues.
-
-Keep `.runtime/`, `.env` and `DISTRICT_STATE_DIR` private. They can contain District
-bearer/refresh tokens, session IDs and booking/cart context as well as the Discord
-token. Never publish them or include them in logs, screenshots or deployment
-archives. Phone numbers and OTPs are sent to District only for the owner-initiated
-login and are not persisted by the bot. Never include live credentials in an issue.
+- The database file holds Discord user IDs and watched BookMyShow/District event
+  codes. Treat `seatsniper.db` as private.
+- The bot only sends what BookMyShow and District already serve publicly. A bug
+  here is a wrong notification, not an unauthorized purchase.

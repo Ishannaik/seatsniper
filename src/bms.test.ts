@@ -1,11 +1,19 @@
 import { expect, test } from "bun:test";
 import * as tls from "node-tls-client";
 import {
-  parseWatchUrl, parseShows, parseVenues, showsOnDate, parseBookableDates, istToEpoch, PROBE_DATE, BmsError, prettyDate,
-  DEFAULT_TLS_PROFILE, resolveTlsProfile, resolveClientIdentifier,
-  parseFormatChips, matchesFormat,
+  DEFAULT_TLS_PROFILE,
+  PROBE_DATE,
+  parseBookableDates,
+  parseFormatChips,
+  parseMoviePoster,
+  parseShows,
+  parseVenues,
+  parseWatchUrl,
+  resolveClientIdentifier,
+  resolveTlsProfile,
 } from "./bms.ts";
-import { matchesTheatre } from "./filters.ts";
+import { showsOnDate } from "./movie-model.ts";
+import { BmsError } from "./provider-error.ts";
 
 // Trimmed from a real 2026-07-27 response for The Odyssey (ET00480917, Mumbai).
 // Two shows on the 28th, one on the 27th — the exact shape BMS returns when it
@@ -27,14 +35,22 @@ const VENUE_HTML = `
 `;
 
 test("parseWatchUrl pulls city, slug, event code and date", () => {
-  const r = parseWatchUrl(
-    "https://in.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727",
-  );
-  expect(r).toEqual({ city: "mumbai", slug: "the-odyssey", eventCode: "ET00480917", date: "20260727" });
+  expect(
+    parseWatchUrl(
+      "https://in.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727",
+    ),
+  ).toEqual({
+    city: "mumbai",
+    slug: "the-odyssey",
+    eventCode: "ET00480917",
+    date: "20260727",
+  });
 });
 
 test("parseWatchUrl works without a trailing date", () => {
-  const r = parseWatchUrl("https://in.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917");
+  const r = parseWatchUrl(
+    "https://in.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917",
+  );
   expect(r.eventCode).toBe("ET00480917");
   expect(r.date).toBeUndefined();
 });
@@ -43,15 +59,20 @@ test("parseWatchUrl rejects a link with no event code instead of guessing", () =
   expect(() => parseWatchUrl("https://in.bookmyshow.com/explore/movies-mumbai")).toThrow(BmsError);
 });
 
-// --- URL edge cases -------------------------------------------------------
 const BASE = "in.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727";
 
 test.each([
   ["https scheme", `https://${BASE}`],
   ["http scheme", `http://${BASE}`],
   ["no scheme", BASE],
-  ["www subdomain", "https://www.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727"],
-  ["mobile subdomain", "https://m.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727"],
+  [
+    "www subdomain",
+    "https://www.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727",
+  ],
+  [
+    "mobile subdomain",
+    "https://m.bookmyshow.com/movies/mumbai/the-odyssey/buytickets/ET00480917/20260727",
+  ],
   ["trailing slash", `https://${BASE}/`],
   ["utm query string", `https://${BASE}?utm_source=share&utm_medium=copy`],
   ["fragment", `https://${BASE}#showtimes`],
@@ -68,8 +89,6 @@ test("a query string is never mistaken for the date", () => {
   expect(parseWatchUrl(`https://${BASE}?ref=20991231`).date).toBe("20260727");
 });
 
-// City changes which theatres exist (mumbai 51 shows, delhi 25, pune 10 for the
-// same event and date), so guessing it would silently watch the wrong city.
 test("parseWatchUrl refuses to guess the city", () => {
   expect(() =>
     parseWatchUrl("https://in.bookmyshow.com/buytickets/some-cinema/ET00480917/20260727"),
@@ -81,25 +100,64 @@ test("parseWatchUrl keeps the city the user actually gave", () => {
 });
 
 test("parseWatchUrl rejects a non-BookMyShow host", () => {
-  expect(() => parseWatchUrl("https://evil.example.com/movies/mumbai/x/buytickets/ET00480917/20260727"))
-    .toThrow(/bookmyshow/i);
+  expect(() =>
+    parseWatchUrl("https://evil.example.com/movies/mumbai/x/buytickets/ET00480917/20260727"),
+  ).toThrow(/bookmyshow/i);
 });
 
-// Slug is verified irrelevant to BMS, so a wrong one must not be an error.
 test("a wrong slug is accepted, because BookMyShow ignores it", () => {
   const r = parseWatchUrl(`https://${BASE}`.replace("the-odyssey", "nonsense-slug"));
   expect(r.eventCode).toBe("ET00480917");
   expect(r.city).toBe("mumbai");
 });
 
-test("parseShows extracts every show with its real date", () => {
+test("parseWatchUrl handles pre-sale synopsis URLs (/{city}/movies/{slug}/{ET}) without confusing slug for city", () => {
+  expect(parseWatchUrl("https://in.bookmyshow.com/mumbai/movies/the-odyssey/ET00480917")).toEqual({
+    city: "mumbai",
+    slug: "the-odyssey",
+    eventCode: "ET00480917",
+    date: undefined,
+  });
+  expect(
+    parseWatchUrl(
+      "https://in.bookmyshow.com/national-capital-region-ncr/movies/pushpa-2-the-rule/ET00356724",
+    ),
+  ).toEqual({
+    city: "national-capital-region-ncr",
+    slug: "pushpa-2-the-rule",
+    eventCode: "ET00356724",
+    date: undefined,
+  });
+  expect(() => parseWatchUrl("https://in.bookmyshow.com/movies/the-odyssey/ET00480917")).toThrow(
+    /city/i,
+  );
+});
+
+test("parseWatchUrl strips mobile share-sheet text and explains opaque shortlinks", () => {
+  expect(
+    parseWatchUrl(
+      "Watch The Odyssey on BookMyShow! https://in.bookmyshow.com/mumbai/movies/the-odyssey/ET00480917.",
+    ),
+  ).toMatchObject({ city: "mumbai", slug: "the-odyssey", eventCode: "ET00480917" });
+
+  for (const shortUrl of ["https://bmsurl.co/abc123", "https://bookmyshow.onelink.me/abc/def"]) {
+    expect(() => parseWatchUrl(shortUrl)).toThrow(/Short share links/i);
+  }
+});
+
+test("parseShows extracts every show with its real date and IST epoch", () => {
   const shows = parseShows(REAL);
   expect(shows).toHaveLength(3);
+  // 2026-07-28 06:40 IST === 2026-07-28T01:10:00Z === 1785201000
   expect(shows[0]).toEqual({
-    sessionId: "14022", availStatus: "3", showDateCode: "20260728",
-    showTime: "06:40 AM", attributes: "IMAX",
-    epoch: istToEpoch("202607280640"),
-    venueCode: "PVRJ", venueName: "PVR: Juhu",
+    sessionId: "14022",
+    availStatus: "3",
+    showDateCode: "20260728",
+    showTime: "06:40 AM",
+    attributes: "IMAX",
+    epoch: 1785201000,
+    venueCode: "PVRJ",
+    venueName: "PVR: Juhu",
   });
 });
 
@@ -107,8 +165,11 @@ test("parseShows lifts venueCode/venueName from venue-card parent", () => {
   const shows = parseShows(VENUE_HTML);
   expect(shows).toHaveLength(2);
   expect(shows[0]).toMatchObject({
-    sessionId: "19229", venueCode: "MCIW", venueName: "Miraj Cinemas: IMAX, Wadala",
-    showDateCode: "20260730", attributes: "IMAX",
+    sessionId: "19229",
+    venueCode: "MCIW",
+    venueName: "Miraj Cinemas: IMAX, Wadala",
+    showDateCode: "20260730",
+    attributes: "IMAX",
   });
   expect(shows[1]).toMatchObject({ sessionId: "19230", venueCode: "IMOB" });
 });
@@ -120,8 +181,6 @@ test("parseVenues returns unique codes with names", () => {
   ]);
 });
 
-// Legacy flat showtimesSections tree — sessions present but no venue-cards means
-// the page reshaped; must throw, not return [] or silently drop venue data.
 const FLAT_SHOWTIMES = `
 "showtimesSections":[{"showtimes":[{"title":"06:40 AM","screenAttr":"IMAX",
 "additionalData":{"sessionId":"14022","availStatus":"3","cutOffDateTime":"202607280655","cutOffDateTimeEpoch":"1785201900","showDateCode":"20260728","showDateTime":"202607280640","showTimeCode":"0640","showTime":"06:40 AM","attributes":"IMAX"}}]}]`;
@@ -136,21 +195,6 @@ test("parseShows throws unparseable when showtimesSections has sessions but no v
   }
 });
 
-// Discord renders <t:epoch:t> in the reader's own timezone, so the epoch has to be
-// the real instant — 06:40 IST, not 06:40 UTC.
-test("istToEpoch treats the wall clock as IST (UTC+5:30)", () => {
-  const e = istToEpoch("202607280640");
-  expect(new Date(e * 1000).toISOString()).toBe("2026-07-28T01:10:00.000Z");
-});
-
-test("every parsed show carries an epoch matching its date and time", () => {
-  for (const s of parseShows(REAL)) {
-    const iso = new Date(s.epoch * 1000).toISOString();
-    expect(iso.startsWith("20")).toBe(true);
-    expect(Number.isFinite(s.epoch)).toBe(true);
-  }
-});
-
 test("bookable dates exclude the probe date BMS echoes back", () => {
   const html = `"dateCode":"20260728" "dateCode":"20260729" "dateCode":"${PROBE_DATE}"`;
   expect(parseBookableDates(html)).toEqual(["20260728", "20260729"]);
@@ -161,86 +205,49 @@ test("bookable dates are deduped and sorted", () => {
   expect(parseBookableDates(html)).toEqual(["20260728", "20260803"]);
 });
 
-test("sessionId is stable across parses, so alerts can't repeat", () => {
-  expect(parseShows(REAL).map((s) => s.sessionId)).toEqual(parseShows(REAL).map((s) => s.sessionId));
+const COMING_SOON =
+  `"additionalData":{"dateCode":"20261117","eventCode":"ET00439706","defaultSortId":"relevance"},` +
+  `"topStickyWidgets":[{"type":"horizontal-block-list","data":[{"type":"vertical-text-list","id":"20261117","styleId":"date-disabled"}]}]`;
+
+test("a page-default date with no shows is not bookable (coming-soon page)", () => {
+  expect(parseBookableDates(COMING_SOON)).toEqual([]);
 });
 
-// The whole point of the project. BMS returns a 200 full of real shows for the
-// WRONG date when the requested one isn't open. Counting shows, or matching
-// "book tickets", reports a false positive here. Comparing showDateCode does not.
+test("a page-default date that has shows stays bookable", () => {
+  const html =
+    `"additionalData":{"dateCode":"20261117","eventCode":"ET00516631","defaultSortId":"relevance"} ` +
+    `"cta":{"type":"dateSelector","additionalData":{"dateCode":"20261117","uuid":"a"}} ` +
+    `"cta":{"type":"dateSelector","additionalData":{"dateCode":"20261118","uuid":"b"}} ` +
+    `"cta":{"type":"dateSelector","additionalData":{"dateCode":"20261119","uuid":"c"}} "showDateCode":"20261117"`;
+  expect(parseBookableDates(html)).toEqual(["20261117", "20261118", "20261119"]);
+});
+
 test("a date with no shows reads as unavailable even though the page is full of shows", () => {
   const shows = parseShows(REAL);
   expect(shows.length).toBeGreaterThan(0);
   expect(showsOnDate(shows, "20260730")).toHaveLength(0);
+  expect(showsOnDate(shows, "20260728")).toHaveLength(2);
 });
 
-test("a date with shows reads as available", () => {
-  expect(showsOnDate(parseShows(REAL), "20260728")).toHaveLength(2);
-});
-
-// --- TLS profile selection --------------------------------------------------
-//
-// The default is a measured value, not a preference: a Safari profile gets 200
-// from a datacenter IP where Chrome profiles are challenged. These pin that the
-// override cannot weaken it silently. No TLS session is opened — ClientIdentifier
-// is a plain lookup table, so the resolution path is testable without network.
-
-test("the TLS profile defaults to the pinned Safari one when unset", () => {
-  expect(resolveTlsProfile({})).toBe(DEFAULT_TLS_PROFILE);
-  expect(DEFAULT_TLS_PROFILE).toBe("safari_ios_18_0");
-});
-
-test("BMS_TLS_PROFILE overrides the default", () => {
-  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "safari_ios_17_0" })).toBe("safari_ios_17_0");
+test("the TLS profile defaults to the pinned Safari one when unset or blank", () => {
+  expect(DEFAULT_TLS_PROFILE).toBe("safari_ios_17_0");
+  expect(resolveTlsProfile({})).toBe("safari_ios_17_0");
+  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "" })).toBe("safari_ios_17_0");
+  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "   " })).toBe("safari_ios_17_0");
+  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "  safari_ios_17_0  " })).toBe("safari_ios_17_0");
   expect(resolveTlsProfile({ BMS_TLS_PROFILE: "firefox_120" })).toBe("firefox_120");
 });
 
-test("a blank BMS_TLS_PROFILE falls back to the default rather than an empty name", () => {
-  // An operator who comments the value out but leaves the key, or leaves
-  // trailing whitespace, gets the default — not a lookup for "".
-  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "" })).toBe(DEFAULT_TLS_PROFILE);
-  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "   " })).toBe(DEFAULT_TLS_PROFILE);
-  expect(resolveTlsProfile({ BMS_TLS_PROFILE: "  safari_ios_17_0  " })).toBe("safari_ios_17_0");
-});
-
-test("the default profile resolves to a real client identifier", () => {
-  expect(resolveClientIdentifier(DEFAULT_TLS_PROFILE)).toBeTruthy();
-});
-
-test("every profile named in the docs is a real client identifier", () => {
-  // Guards against documenting a profile that node-tls-client does not ship,
-  // which would only surface as a startup crash on an operator's VPS.
+test("every profile named in the docs resolves to a real client identifier", () => {
   for (const profile of ["safari_ios_17_0", "safari_ios_18_0", "safari_16_0", "firefox_120"]) {
     expect(resolveClientIdentifier(profile)).toBeTruthy();
   }
 });
 
-test("an unknown profile fails loudly instead of falling back", () => {
-  // The dangerous failure mode is a silent fallback: to the default (hiding the
-  // typo) or to whatever the library picks (which could be Chrome). It must throw.
-  try {
-    resolveClientIdentifier("safari_ios_18_o"); // letter o, not zero
-    expect.unreachable();
-  } catch (e) {
-    expect(e).toBeInstanceOf(BmsError);
-    expect((e as BmsError).kind).toBe("unparseable");
-    expect((e as BmsError).message).toContain("BMS_TLS_PROFILE");
-  }
-});
-
-test("an empty profile name is rejected, not treated as 'use anything'", () => {
+test("unknown or empty TLS profile names fail loudly instead of falling back", () => {
   expect(() => resolveClientIdentifier("")).toThrow(BmsError);
-});
-
-test("a Chrome profile is rejected even though node-tls-client ships it", () => {
-  // The library knowing the name is not the bar: BookMyShow serves Chrome
-  // fingerprints Cloudflare challenges, so a bot started on one polls forever
-  // and never notifies. Failing at startup is the only visible failure.
-  const { ClientIdentifier } = tls as any;
-  expect(ClientIdentifier.chrome_120).toBeTruthy(); // the library really does have it
-
   try {
-    resolveClientIdentifier("chrome_120");
+    resolveClientIdentifier("safari_ios_18_o");
     expect.unreachable();
   } catch (e) {
     expect(e).toBeInstanceOf(BmsError);
@@ -249,91 +256,15 @@ test("a Chrome profile is rejected even though node-tls-client ships it", () => 
   }
 });
 
-test("every Chrome-family profile the library ships is rejected", () => {
-  const { ClientIdentifier } = tls as any;
-  const chromeKeys = Object.keys(ClientIdentifier).filter((k) => k.startsWith("chrome"));
+test("every Chrome-family profile is rejected, including padded input", () => {
+  const chromeKeys = Object.keys(tls.ClientIdentifier).filter((k) => k.startsWith("chrome"));
   expect(chromeKeys.length).toBeGreaterThan(0);
   for (const key of chromeKeys) {
     expect(() => resolveClientIdentifier(key)).toThrow(BmsError);
   }
+  expect(() => resolveClientIdentifier("  chrome_120  ")).toThrow(/BMS_TLS_PROFILE/);
 });
 
-test("an unsupported profile is rejected on padding too, not just exact spelling", () => {
-  expect(() => resolveClientIdentifier("  chrome_120  ")).toThrow(BmsError);
-});
-
-// --- prettyDate -------------------------------------------------------------
-//
-// The BMS date code is what every DM the bot sends is stamped with, so a
-// regression here is visible to users on every alert. These pin the exact
-// strings, not just "it returned something".
-
-test("prettyDate renders a BMS date code as a human date", () => {
-  expect(prettyDate("20260730")).toBe("Thu, 30 Jul");
-  expect(prettyDate("20260728")).toBe("Tue, 28 Jul");
-  expect(prettyDate("20261231")).toBe("Thu, 31 Dec");
-});
-
-test("prettyDate does not zero-pad a single-digit day", () => {
-  // "5 Jan", not "05 Jan" — the day is formatted as numeric.
-  expect(prettyDate("20260105")).toBe("Mon, 5 Jan");
-  expect(prettyDate("20260803")).toBe("Mon, 3 Aug");
-});
-
-test("prettyDate handles a leap day", () => {
-  expect(prettyDate("20240229")).toBe("Thu, 29 Feb");
-});
-
-test("prettyDate is stable across timezones", () => {
-  // prettyDate builds the date in local time and formats it in local time, so
-  // the day component cannot drift. The naive alternative — parsing
-  // "2026-07-30" as a date-only string — is read as UTC midnight and lands on
-  // the 29th anywhere behind UTC.
-  const naive = (iso: string) =>
-    new Date(iso).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
-
-  const before = process.env.TZ;
-  try {
-    for (const tz of ["UTC", "Asia/Kolkata", "Pacific/Kiritimati", "Pacific/Niue"]) {
-      process.env.TZ = tz;
-      expect(prettyDate("20260730")).toBe("Thu, 30 Jul");
-    }
-    // Control, so this test cannot quietly pass because the TZ switch is inert:
-    // the naive form really does drift in the westmost zone above (UTC-11).
-    process.env.TZ = "Pacific/Niue";
-    expect(naive("2026-07-30")).toBe("Wed, 29 Jul");
-  } finally {
-    if (before === undefined) delete process.env.TZ;
-    else process.env.TZ = before;
-  }
-});
-
-// Characterization: these record what prettyDate does with input it does not
-// promise to handle, so the behaviour is visible rather than surprising. Both
-// are currently unreachable — index.ts routes an empty date to the
-// subscription flow and messages.ts guards `w.date === ""` — so this documents
-// a landmine for future callers, it does not report a live bug.
-
-test("prettyDate on a non-numeric string is an explicit Invalid Date", () => {
-  expect(prettyDate("notadate")).toBe("Invalid Date");
-});
-
-test("prettyDate fails silently on the empty subscription date", () => {
-  // Number("") is 0, so this becomes new Date(0, -1, 0) — a real 1899 date
-  // that formats without complaint. Never pass a subscription's date here.
-  expect(prettyDate("")).toBe("Thu, 30 Nov");
-});
-
-test("prettyDate rolls an out-of-range month over instead of rejecting it", () => {
-  // Month 13 of 2026 becomes January 2027; the Date constructor normalises.
-  expect(prettyDate("20261301")).toBe("Fri, 1 Jan");
-});
-
-// ---------------------------------------------------------------- format chips
-
-// Trimmed from a real 2026-08-10 Spider-Man: Brand New Day response. ScreenX (and
-// other premium formats) are SEPARATE child event codes — their shows never appear
-// under the parent event's attributes.
 const CHIP_HTML = `
 {"type":"chip","title":"2D","cta":{"type":"formatSelector","analytics":{"event_code":"ET00502600","format":"2D","screen_name":"movie_showtimes","uuid":"aaa"},"additionalData":{"eventCode":"ET00502600","eventUrl":"spider-man-brand-new-day","language":"English","refEventCode":"ET00502600","uuid":"bbb"}}},
 {"type":"chip","title":"3D SCREEN X","cta":{"type":"formatSelector","analytics":{"event_code":"ET00502684","format":"3D SCREEN X","screen_name":"movie_showtimes","uuid":"ccc"},"additionalData":{"eventCode":"ET00502684","eventUrl":"spider-man-brand-new-day-3d-screen-x","language":"English","refEventCode":"ET00502684","uuid":"ddd"}}},
@@ -341,54 +272,41 @@ const CHIP_HTML = `
 `;
 
 test("parseFormatChips extracts child event codes from format-selector chips", () => {
-  const chips = parseFormatChips(CHIP_HTML);
-  expect(chips).toEqual([
+  expect(parseFormatChips(CHIP_HTML)).toEqual([
     { title: "2D", eventCode: "ET00502600", slug: "spider-man-brand-new-day" },
     { title: "3D SCREEN X", eventCode: "ET00502684", slug: "spider-man-brand-new-day-3d-screen-x" },
     { title: "IMAX 3D", eventCode: "ET00502699", slug: "spider-man-brand-new-day-imax-3d" },
   ]);
-});
-
-test("parseFormatChips returns [] for a page with no format selector", () => {
   expect(parseFormatChips("<html><body>no chips here</body></html>")).toEqual([]);
 });
 
-// ---------------------------------------------------------------- format matching
-
-test("matchesFormat is case-insensitive: IMAX matches IMAX", () => {
-  expect(matchesFormat("IMAX", "IMAX")).toBe(true);
-  expect(matchesFormat("imax", "IMAX")).toBe(true);
+test("parseShows skips sold-out availStatus 0 and extracts optional BMS tier categories", () => {
+  const html = `
+  "showtimesSections":[{"data":[{"type":"venue-card","additionalData":{"venueCode":"PVRJ","venueName":"PVR: Juhu"},
+  "showtimes":[
+    {"additionalData":{"sessionId":"1001","availStatus":"0","showDateCode":"20260728","showDateTime":"202607280640","showTimeCode":"0640","showTime":"06:40 AM","attributes":"IMAX"}},
+    {"additionalData":{"sessionId":"1002","availStatus":"2","showDateCode":"20260728","showDateTime":"202607280955","showTimeCode":"0955","showTime":"09:55 AM","attributes":"IMAX","categories":[{"priceDesc":"CLASSIC","curPrice":"450.00","availStatus":"2"},{"priceDesc":"RECLINER","curPrice":"950.00","availStatus":"0"}]}}
+  ]}]}]`;
+  const shows = parseShows(html);
+  expect(shows).toHaveLength(1);
+  expect(shows[0]!.sessionId).toBe("1002");
+  expect(shows[0]!.ticketCategories).toEqual([
+    { name: "CLASSIC", price: 450, available: 1 },
+    { name: "RECLINER", price: 950, available: 0 },
+  ]);
 });
 
-test("matchesFormat substring: IMAX catches IMAX 3D", () => {
-  expect(matchesFormat("IMAX 3D", "IMAX")).toBe(true);
-});
-
-test("matchesFormat space-insensitive: SCREENX catches 3D SCREEN X", () => {
-  expect(matchesFormat("3D SCREEN X", "SCREENX")).toBe(true);
-  expect(matchesFormat("3D SCREEN X", "SCREEN X")).toBe(true);
-  expect(matchesFormat("3D SCREEN X", "SCREENX,SCREEN X")).toBe(true);
-});
-
-test("matchesFormat false when no token matches", () => {
-  expect(matchesFormat("ATMOS", "SCREENX")).toBe(false);
-  expect(matchesFormat("", "SCREENX")).toBe(false);
-  expect(matchesFormat("IMAX", "4DX,SCREENX")).toBe(false);
-});
-
-test("matchesFormat multi-token filter needs only one hit", () => {
-  expect(matchesFormat("4DX", "SCREENX,4DX")).toBe(true);
-});
-
-test("ScreenX child event codes and theatre filter both apply", () => {
-  // Format chips name the child event ScreenX lives under; theatre: still
-  // selects venues independently, so a watch can ask for ScreenX at PVR.
-  const screenx = parseFormatChips(CHIP_HTML).find((c) => matchesFormat(c.title, "SCREENX"));
-  expect(screenx?.eventCode).toBe("ET00502684");
-  expect(screenx?.slug).toBe("spider-man-brand-new-day-3d-screen-x");
-
-  const venues = parseVenues(VENUE_HTML);
-  expect(venues.filter((v) => matchesTheatre(v.name, v.code, "PVR")).map((v) => v.code)).toEqual([]);
-  expect(venues.filter((v) => matchesTheatre(v.name, v.code, "MIRAJ,IMAX WADALA")).map((v) => v.code)).toEqual(["MCIW"]);
-  expect(venues.filter((v) => matchesTheatre(v.name, v.code, "INOX")).map((v) => v.code)).toEqual(["IMOB"]);
+test("parseMoviePoster extracts verified iedb movie posters and ignores generic BMS logos", () => {
+  expect(
+    parseMoviePoster(
+      '<meta property="og:image" content="https://assets-in.bmscdn.com/iedb/movies/images/mobile/thumbnail/xlarge/the-odyssey-et00480917.jpg">',
+    ),
+  ).toBe(
+    "https://assets-in.bmscdn.com/iedb/movies/images/mobile/thumbnail/xlarge/the-odyssey-et00480917.jpg",
+  );
+  expect(
+    parseMoviePoster(
+      '<meta property="og:image" content="https://in.bmscdn.com/webin/common/favicon.png">',
+    ),
+  ).toBeUndefined();
 });

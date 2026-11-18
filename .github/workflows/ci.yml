@@ -4,14 +4,120 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  test:
+  quality-and-test:
+    name: Quality, Types & Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - name: Checkout repository
+        uses: actions/checkout@v7
         with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - run: bun test
+          persist-credentials: false
+
+      # Pin Bun 1.4.2 on Linux to match Dockerfile and avoid the Linux Koffi FFI + GC
+      # event-loop deadlock introduced in Bun 1.4.3/1.4.4 (oven-sh/bun#44982).
+      - name: Setup Bun 1.4.2
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-1.4.2-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-1.4.2-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate shell scripts
+        run: |
+          bash -n install.sh
+          bash -n infra/kuma-heartbeat.sh
+
+      - name: Lint & format check
+        run: bun run lint
+
+      - name: Static typecheck
+        run: bun run typecheck
+
+      - name: Architecture & AGENTS.md drift gate
+        run: bun run quality
+
+      - name: Dead-code & orphan module check
+        run: bun run deadcode
+
+      - name: Unit & integration flow tests
+        run: bun test --coverage
+
+      - name: Bundle smoke check
+        run: |
+          bun build src/index.ts --outdir /tmp/seatsniper-dist --target=bun
+          bun build src/register.ts --outdir /tmp/seatsniper-dist --target=bun
+
+  secrets:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Gitleaks v8.30.1
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          chmod +x /tmp/gitleaks
+          if [[ -f .gitleaks.toml ]]; then
+            /tmp/gitleaks git --no-banner --redact -c .gitleaks.toml .
+          else
+            /tmp/gitleaks git --no-banner --redact .
+          fi
+
+  docker-smoke:
+    name: Docker Build & Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build production image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: seatsniper:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify non-root user, Bun 1.4.2 pin & entrypoint bundle
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint id seatsniper:ci -un)" = "bun"
+          test "$(docker run --rm --entrypoint bun seatsniper:ci --version)" = "1.4.2"
+          docker run --rm --entrypoint bun seatsniper:ci build src/index.ts --outdir /tmp/out --target=bun
+          docker run --rm --entrypoint bun seatsniper:ci build src/register.ts --outdir /tmp/out --target=bun

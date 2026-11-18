@@ -1,54 +1,57 @@
 # Releasing SeatSniper
 
-Tags follow **`vX.Y.Z`** (e.g. `v0.1.0`), matching `version` in [`package.json`](../package.json).
+Tags follow **`vX.Y.Z`** (e.g. `v0.2.0`), matching `version` in [`package.json`](../package.json).
 
-## Checklist
+Pushing a `v*.*.*` tag triggers [`.github/workflows/release.yml`](../.github/workflows/release.yml), which automatically:
+1. Verifies the Git tag matches `package.json` `version` and runs the full CI gate (`lint`, `typecheck`, `quality`, `deadcode`, `bun test`, shell syntax checks).
+2. Builds and pushes a multi-architecture (`linux/amd64` + `linux/arm64` for x86 and Oracle Cloud Ampere A1) container image to GitHub Container Registry (`ghcr.io/ishannaik/seatsniper:X.Y.Z`, `:X.Y`, and `:latest`).
+3. Publishes the GitHub Release using the PR label categories in [`.github/release.yml`](../.github/release.yml) (unless you already created custom release notes beforehand).
 
-1. **Finish the work** on a feature branch and merge to `main` when ready.
-2. **Bump version** in `package.json` (semver: patch / minor / major).
-3. **Update [`CHANGELOG.md`](../CHANGELOG.md)**:
+---
+
+## Release Checklist
+
+1. **Land all changes on `main`** via pull request and confirm `.github/workflows/ci.yml` is green.
+2. **Run the local verification suite**:
+
+   ```bash
+   bun run check
+   ```
+
+3. **Bump `version`** in [`package.json`](../package.json) (semver: patch / minor / major).
+4. **Update [`CHANGELOG.md`](../CHANGELOG.md)**:
    - Move items from `[Unreleased]` into a new `## [X.Y.Z] - YYYY-MM-DD` section.
-   - Add compare links at the bottom (`[X.Y.Z]: …/compare/vPREV…vX.Y.Z`).
-4. **Commit** the version + changelog changes on `main`.
-5. **Tag locally** (do not push until you are sure):
+   - Add the compare link at the bottom (`[X.Y.Z]: https://github.com/Ishannaik/seatsniper/compare/vPREV...vX.Y.Z`).
+5. **Merge or commit** the version + changelog update to `main`.
+6. **Create an annotated tag and push it**:
 
    ```bash
+   git checkout main && git pull --ff-only
    git tag -a vX.Y.Z -m "vX.Y.Z"
-   ```
-
-6. **Create the GitHub release** (generates notes from merged PRs/commits; categories from [`.github/release.yml`](../.github/release.yml)):
-
-   ```bash
-   gh release create vX.Y.Z --generate-notes
-   ```
-
-   Or with a title and body from the changelog:
-
-   ```bash
-   gh release create vX.Y.Z --title "vX.Y.Z" --notes-file CHANGELOG.md
-   ```
-
-7. **Push tag** only when intentional:
-
-   ```bash
    git push origin vX.Y.Z
    ```
 
-## First release (`v0.1.0`)
+7. **Verify the Release workflow**:
 
-No tag exists on the remote yet. When ready to publish the current `0.1.0` line:
+   ```bash
+   gh run list --workflow=release.yml --limit 3
+   gh release view vX.Y.Z
+   ```
+
+---
+
+## Custom Release Notes (Optional)
+
+If you want curated prose from `CHANGELOG.md` instead of `--generate-notes` alone, create the GitHub Release right before pushing the tag (or edit it afterward)—`release.yml` detects existing releases and preserves your body:
 
 ```bash
-git checkout main
-git tag -a v0.1.0 -m "v0.1.0 — first release"
-gh release create v0.1.0 --generate-notes
-git push origin v0.1.0
+gh release create vX.Y.Z --verify-tag --title "vX.Y.Z" --notes-file RELEASE_NOTES.md
 ```
 
-Copy the `[0.1.0]` section from `CHANGELOG.md` into the release description if you want richer notes than `--generate-notes` alone.
+---
 
 ## Notes
 
-- Prefer **annotated tags** (`-a`) so `git describe` works cleanly.
-- Release notes categories are configured in `.github/release.yml`; label PRs (`feature`, `bug`, `docs`, etc.) for nicer auto-grouping.
-- Do **not** tag pre-release WIP on feature branches unless explicitly shipping a prerelease (`v0.2.0-rc.1`).
+- Always use **annotated tags** (`git tag -a`) so `git describe` resolves cleanly.
+- Prerelease tags such as `v0.3.0-rc.1` are marked `--prerelease` on GitHub Releases and do **not** move the `:latest` GHCR tag.
+- Label pull requests (`feature`, `bug`, `docs`, `chore`) so [`.github/release.yml`](../.github/release.yml) groups auto-generated notes cleanly.
