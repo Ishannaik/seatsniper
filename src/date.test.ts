@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BmsError } from "./bms.ts";
+import { BmsError } from "./provider-error.ts";
 import { normaliseDate } from "./date.ts";
 
 describe("normaliseDate", () => {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { normaliseFormats, normaliseDays, matchesFormat, filterSummary } from "./filters.ts";
+import { formatSuggestions, normaliseFormats, normaliseDays, matchesFormat, filterSummary, dayOfWeek } from "./filters.ts";
 
 test("normaliseFormats uppercases and trims every variant", () => {
   expect(normaliseFormats("ScreenX")).toBe("SCREENX");
@@ -73,4 +73,30 @@ test("filterSummary keeps format and day parts alongside the window", () => {
 test("filterSummary still works for callers that omit the time fields", () => {
   // The two new keys are optional, so pre-existing call sites keep compiling.
   expect(filterSummary({ format_filter: "IMAX", day_filter: null })).toBe("IMAX");
+});
+
+test('PXL and IMAX formats match dimensions, punctuation and case without empty wildcard', () => {
+  expect(matchesFormat('P[XL] (3D)', 'pxl')).toBe(true);
+  expect(matchesFormat('PXL (3D)', 'PXL 3D')).toBe(true);
+  expect(matchesFormat('PXL 2D', 'PXL 3D')).toBe(false);
+  expect(matchesFormat('IMAX 3D', 'IMAX')).toBe(true);
+  expect(matchesFormat('PXL', 'IMAX')).toBe(false);
+  expect(matchesFormat('IMAX 2D', 'PXL, IMAX')).toBe(true);
+  expect(matchesFormat('Standard 2D', ',')).toBe(false);
+});
+
+test('format autocomplete suggests PXL and preserves comma-separated selections', () => {
+  expect(formatSuggestions('px').map(c => c.value)).toContain('PXL');
+  expect(formatSuggestions('PXL, im').map(c => c.value)).toContain('PXL,IMAX');
+  expect(formatSuggestions('PXL,').map(c => c.value)).not.toContain('PXL,PXL');
+});
+
+test("dayOfWeek maps a YYYYMMDD code to its weekday", () => {
+  expect(dayOfWeek("20261003")).toBe("sat"); // 3 Oct 2026 is a Saturday
+});
+
+test("dayOfWeek throws on a code that isn't 8 digits instead of returning undefined", () => {
+  expect(() => dayOfWeek("202613")).toThrow("YYYYMMDD");
+  expect(() => dayOfWeek("")).toThrow("YYYYMMDD");
+  expect(() => dayOfWeek("2026-10-03")).toThrow("YYYYMMDD");
 });

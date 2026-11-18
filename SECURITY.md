@@ -24,3 +24,17 @@ Do not open a public issue that exposes a live Discord token.
   `seatsniper.db` as private.
 - The bot only sends what BookMyShow already serves publicly. A bug here is a
   wrong notification, not an unauthorized purchase.
+
+
+## Personal District booking
+
+The optional `/book` integration uses District's official authenticated connector.
+It can place real holds and initiate payments after the configured owner confirms
+District's exact summaries. Report unintended writes, cross-user account access,
+confirmation replay and duplicate payment attempts as security issues.
+
+Keep `.runtime/`, `.env` and `DISTRICT_STATE_DIR` private. They can contain District
+bearer/refresh tokens, session IDs and booking/cart context as well as the Discord
+token. Never publish them or include them in logs, screenshots or deployment
+archives. Phone numbers and OTPs are sent to District only for the owner-initiated
+login and are not persisted by the bot. Never include live credentials in an issue.

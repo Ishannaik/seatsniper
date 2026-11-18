@@ -1,4 +1,4 @@
-import { BmsError } from "./bms.ts";
+import { BmsError } from "./provider-error.ts";
 
 /** "2026-07-30" | "20260730" -> "20260730". Throws on anything else. */
 export function normaliseDate(input: string): string {

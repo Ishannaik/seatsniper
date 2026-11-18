@@ -112,6 +112,9 @@ docker compose run --rm seatsniper bun run commands   # register slash commands
 docker compose up -d
 ```
 
+Docker users do not need to run `bun pm trust --all` manually; the image's
+dependency setup handles the required native dependency.
+
 The database lives in a named volume, so the bot survives container restarts.
 
 There is no HTTP healthcheck. `docker compose ps` showing "up" only means the
@@ -258,7 +261,10 @@ src/
   register.ts     slash command registration
   time-filter.ts  IST after/before time filter parser and show matcher
 assets/            logo
-docs/              design specs and measured findings
+docs/
+  ops.md          self-hosting operations notes
+  releasing.md    release checklist: version bump, changelog, tag
+  superpowers/    design specs and measured findings
 ```
 
 <a id="bookmyshow-quirks"></a>
@@ -305,6 +311,11 @@ constraints the bot was built around. Report security issues privately, see
 [good first issues](https://github.com/Ishannaik/seatsniper/labels/good%20first%20issue)
 label.
 
+## Community
+
+Join the [Discord](https://discord.gg/KKvtRhQvRv) to chat with other contributors and get help.
+Share feedback, swap ideas, or ask questions before opening a PR.
+
 ## 📄 License
 
 MIT, see [LICENSE](LICENSE).
@@ -317,3 +328,29 @@ it.**
 <p align="center">
   <sub>Observes and notifies only. Never buys tickets. Made for the Friday 9 AM rush.</sub>
 </p>
+
+
+## District support and private Discord DM watches
+
+SeatSniper now includes District movie and event monitoring alongside BookMyShow,
+with provider-aware persistence, filtering and explicit error handling. The
+optional Discord DM entry point lets each user manage private movie watches:
+
+```text
+watch <movie link> date:2026-12-18 time:18:30 theatre:"Oberoi Mall" format:PXL
+list
+stop 1
+stop all
+help
+```
+
+Each account gets its own filters, five-watch limit, persistent state and private
+alerts. A matching-show alert completes that watch. Times are IST. Date is
+required unless in the URL; time, theatre and format are optional. Checks run
+every 30 seconds with automatic backoff. Watch commands do not hold or pay.
+
+See [setup and privacy details](docs/discord-dm-watches.md) to run the optional
+`src/doomsday-cloud.ts` entry point instead of the original slash-command bot.
+Legacy hard-coded monitoring is disabled by default. Optional District booking
+and voice integrations remain restricted to the configured owner and require
+separate confirmations for booking actions. Never share tokens or runtime state.

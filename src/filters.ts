@@ -1,5 +1,5 @@
 /** Known BMS screen formats for autocomplete. */
-export const FORMAT_CHOICES = ["IMAX", "IMAX 3D", "4DX", "ScreenX", "3D", "2D", "MX4D", "ICE", "Dolby Atmos", "Dolby Cinema", "RPX", "VIP"];
+export const FORMAT_CHOICES = ["PXL", "PXL 3D", "PXL 2D", "IMAX", "IMAX 3D", "IMAX 2D", "4DX", "ScreenX", "3D", "2D", "MX4D", "ICE", "Dolby Atmos", "Dolby Cinema", "RPX", "VIP"];
 export const DAY_CHOICES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 /** "IMAX, 4dx , screenx" -> "IMAX,4DX,SCREENX" | null */
@@ -22,16 +22,23 @@ export function normaliseDays(raw: string | null): string | null {
   return days.join(",");
 }
 
-/** YYYYMMDD -> "mon"|"tue"|...|"sun" (UTC, host-TZ-independent). */
+/** YYYYMMDD -> "mon"|"tue"|...|"sun" (UTC, host-TZ-independent). Throws on anything that isn't 8 digits. */
 export function dayOfWeek(dateCode: string): string {
+  // Fail where the bad data shows up. Without this, a short code yields NaN parts and
+  // an out-of-range index, so the day filter quietly matches nothing.
+  if (!/^\d{8}$/.test(dateCode)) throw new Error(`dayOfWeek: expected a YYYYMMDD date code, got ${JSON.stringify(dateCode)}`);
   const [y, m, d] = [+dateCode.slice(0, 4), +dateCode.slice(4, 6), +dateCode.slice(6, 8)];
   return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][new Date(Date.UTC(y, m - 1, d)).getUTCDay()]!;
 }
 
 /** Does a show's format match the filter? Case-insensitive substring: "IMAX" catches "IMAX 3D", and spaces are ignored so "SCREEN X" matches "SCREENX". */
 export function matchesFormat(attributes: string, filter: string): boolean {
-  const attr = (attributes ?? "").toUpperCase().replace(/\s+/g, "");
-  return filter.split(",").some((f) => attr.includes(f.replace(/\s+/g, "")));
+  const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const attr = compact(attributes ?? "");
+  return filter.split(",").some((f) => {
+    const needle = compact(f);
+    return needle.length > 0 && attr.includes(needle);
+  });
 }
 
 /** Does a YYYYMMDD date fall on one of the filtered days? */
@@ -62,8 +69,12 @@ export function filterSummary(w: {
   theatre_filter?: string | null;
   after_filter?: string | null;
   before_filter?: string | null;
+  seat_count?: number | null;
+  seat_budget?: number | null;
 }): string | null {
   const parts: string[] = [];
+  if (w.seat_count != null) parts.push(`${w.seat_count} seats in one category (adjacency unchecked)`);
+  if (w.seat_budget != null) parts.push(`up to ₹${w.seat_budget}/seat before fees`);
   if (w.format_filter) parts.push(w.format_filter.split(",").join(" · "));
   if (w.theatre_filter) parts.push(w.theatre_filter.split(",").join(" · "));
   if (w.day_filter) parts.push(w.day_filter.split(",").map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(", "));
@@ -73,4 +84,15 @@ export function filterSummary(w: {
   else if (w.after_filter) parts.push(`after ${w.after_filter}`);
   else if (w.before_filter) parts.push(`before ${w.before_filter}`);
   return parts.length ? parts.join(" · ") : null;
+}
+
+/** Preserve existing alternatives while suggesting the last comma-separated format. */
+export function formatSuggestions(value: string): {name: string; value: string}[] {
+  const parts = value.split(",");
+  const query = parts.pop()!.trim().toUpperCase();
+  const selected = parts.map(p => p.trim()).filter(Boolean);
+  return FORMAT_CHOICES.filter(choice => choice.toUpperCase().includes(query)
+    && !selected.some(p => p.toUpperCase() === choice.toUpperCase()))
+    .map(choice => ({name: choice, value: [...selected, choice].join(",")}))
+    .filter(choice => choice.value.length <= 100).slice(0,25);
 }

@@ -142,8 +142,8 @@ test("listWatches never returns another user's watches", () => {
 
   const watches = listWatches("user-a");
   expect(watches).toHaveLength(1);
-  expect(watches[0].id).toBe(aId);
-  expect(watches[0].user_id).toBe("user-a");
+  expect(watches[0]!.id).toBe(aId);
+  expect(watches[0]!.user_id).toBe("user-a");
 });
 
 test("removeWatch rejects cross-user deletes and allows the owner", () => {
@@ -176,4 +176,15 @@ test("theatre_filter defaults to null when the option is omitted", () => {
   const id = addWatchFor("u-no-theatre", "EVENT-NT");
 
   expect(listWatches("u-no-theatre").find((w) => w.id === id)?.theatre_filter).toBeNull();
+});
+
+
+test("provider and city are part of watch identity", () => {
+  const base = { user_id: "u", channel_id: "c", city: "mumbai", slug: "movie", event_code: "MV176276", date: "", title: "Movie" };
+  const district = addWatch({ ...base, provider: "district" });
+  expect(district).not.toBeNull();
+  expect(addWatch({ ...base, provider: "district" })).toBeNull();
+  expect(addWatch({ ...base, provider: "district", city: "pune" })).not.toBeNull();
+  expect(addWatch({ ...base, provider: "bms" })).not.toBeNull();
+  expect(listWatches("u").find((w) => w.id === district)!.provider).toBe("district");
 });
