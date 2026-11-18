@@ -1,0 +1,17 @@
+# Gitleaks config for SeatSniper. Extends the default ruleset — this file only
+# adds narrow allowlists for known non-secret test fixtures and examples.
+# Never widen these to broad source directories: .env holds real Discord tokens
+# locally, and broad path exclusions would mask genuine credential leaks.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "HTML/SSR scraper test fixtures and .env.example placeholders"
+paths = [
+  '''^src/fixtures/.*\.(html|txt|json)$''',
+  '''^\.env\.example$''',
+]
+regexes = [
+  '''DISCORD_TOKEN=your[-_a-z0-9]*''',
+]

@@ -6,6 +6,8 @@ set -euo pipefail
 REPO="${SEATSNIPER_REPO:-https://github.com/Ishannaik/seatsniper.git}"
 DIR="${SEATSNIPER_DIR:-$HOME/seatsniper}"
 BRANCH="${SEATSNIPER_BRANCH:-main}"
+# Pin Bun 1.4.2 on fresh Linux installs to avoid oven-sh/bun#44982 (Koffi FFI + GC freeze in 1.4.3/1.4.4).
+BUN_RELEASE="${SEATSNIPER_BUN_VERSION:-bun-v1.4.2}"
 
 # cinema lobby palette
 R=$'\033[0m'
@@ -20,6 +22,7 @@ ERR=$'\033[38;5;203m'
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n%s▸%s %s%s%s\n' "$AMB" "$R" "$B" "$*" "$R"; }
 ok()   { printf '  %s✓%s %s\n' "$OK" "$R" "$*"; }
+warn() { printf '  %s!%s %s\n' "$AMB" "$R" "$*"; }
 die()  { printf '%s✗ %s%s\n' "$ERR" "$*" "$R" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "need \`$1\` on PATH"; }
 
@@ -44,7 +47,7 @@ EOF
    ╚══════╝╚═╝  ╚═══╝╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝
 
 EOF
-  printf '%s%s  BookMyShow opens → Discord DM. One install.%s\n' "$DIM" "$CREAM" "$R"
+  printf '%s%s  BookMyShow & District opens → Discord DM. One install.%s\n' "$DIM" "$CREAM" "$R"
 }
 
 # curl|bash steals stdin — always talk to the real terminal
@@ -105,11 +108,21 @@ ensure_bun() {
   export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
   export PATH="$BUN_INSTALL/bin:$PATH"
   if command -v bun >/dev/null 2>&1; then
-    ok "Bun $(bun --version)"
+    local bver
+    bver="$(bun --version)"
+    ok "Bun ${bver}"
+    if [[ "$(uname -s)" == "Linux" && ( "$bver" == "1.4.3" || "$bver" == "1.4.4" ) ]]; then
+      warn "Bun ${bver} on Linux has a known Koffi FFI GC freeze (oven-sh/bun#44982)"
+      say "    ${DIM}recommended pin: curl -fsSL https://bun.sh/install | bash -s \"bun-v1.4.2\"${R}"
+    fi
     return
   fi
-  say "  installing Bun…"
-  curl -fsSL https://bun.sh/install | bash
+  say "  installing Bun (${BUN_RELEASE})…"
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    curl -fsSL https://bun.sh/install | bash -s "$BUN_RELEASE"
+  else
+    curl -fsSL https://bun.sh/install | bash
+  fi
   export PATH="$BUN_INSTALL/bin:$PATH"
   command -v bun >/dev/null 2>&1 || die "Bun install finished but \`bun\` not on PATH"
   ok "Bun $(bun --version)"
@@ -153,25 +166,39 @@ write_env() {
     if [[ -n "${DISCORD_GUILD_ID:-}" ]]; then
       printf 'DISCORD_GUILD_ID=%s\n' "$DISCORD_GUILD_ID"
     fi
+    if [[ -n "${UPTIME_KUMA_PUSH_URL:-}" ]]; then
+      printf 'UPTIME_KUMA_PUSH_URL=%s\n' "$UPTIME_KUMA_PUSH_URL"
+    fi
   } >"$envf"
   ok "wrote .env (mode 600)"
 }
 
 start_bot() {
   cd "$DIR"
+  local bun_bin
+  bun_bin="$(command -v bun)"
+  if command -v systemctl >/dev/null 2>&1 && systemctl --user list-unit-files seatsniper.service 2>/dev/null | grep -q seatsniper.service; then
+    if systemctl --user is-active --quiet seatsniper.service || systemctl --user is-enabled --quiet seatsniper.service; then
+      systemctl --user daemon-reload
+      systemctl --user restart seatsniper.service
+      ok "restarted systemd user service \`seatsniper.service\`"
+      say "  ${DIM}systemctl --user status seatsniper.service${R}"
+      return
+    fi
+  fi
   if command -v pm2 >/dev/null 2>&1; then
     if pm2 describe seatsniper >/dev/null 2>&1; then
       pm2 restart seatsniper --update-env
     else
-      pm2 start "$BUN_INSTALL/bin/bun" --name seatsniper --interpreter none --time -- run src/index.ts
+      pm2 start "$bun_bin" --name seatsniper --interpreter none --time --max-memory-restart 350M -- run src/index.ts
     fi
     pm2 save >/dev/null 2>&1 || true
-    ok "running under pm2 as \`seatsniper\`"
+    ok "running under pm2 as \`seatsniper\` (350M memory cap)"
     say "  ${DIM}pm2 logs seatsniper${R}"
   else
     ok "deps ready — start with:"
     say "  ${B}cd $DIR && bun run start${R}"
-    say "  ${DIM}(install pm2 for background: npm i -g pm2)${R}"
+    say "  ${DIM}(for background daemon: npm i -g pm2, or see infra/systemd/seatsniper.service)${R}"
   fi
 }
 
@@ -191,19 +218,24 @@ main() {
   step "Source"
   clone_or_update
 
-  step "Discord credentials"
+  step "Discord & monitoring credentials"
   say "  ${DIM}https://discord.com/developers/applications → your app → Bot / OAuth2${R}"
   DISCORD_TOKEN="${DISCORD_TOKEN:-}"
   DISCORD_CLIENT_ID="${DISCORD_CLIENT_ID:-}"
   DISCORD_GUILD_ID="${DISCORD_GUILD_ID:-}"
+  UPTIME_KUMA_PUSH_URL="${UPTIME_KUMA_PUSH_URL:-}"
   prompt DISCORD_TOKEN "Bot token" secret
   prompt DISCORD_CLIENT_ID "Application (client) ID"
   prompt_opt DISCORD_GUILD_ID "Guild ID for instant slash commands"
+  prompt_opt UPTIME_KUMA_PUSH_URL "Uptime Kuma Push URL for heartbeat alerts"
   write_env
 
   step "Dependencies"
   cd "$DIR"
-  bun install
+  bun install --frozen-lockfile || bun install
+  if bun pm untrusted 2>/dev/null | grep -vq "Found 0 untrusted"; then
+    bun pm trust --all || true
+  fi
   ok "packages installed"
 
   step "Slash commands"
@@ -217,8 +249,8 @@ main() {
   printf '%s  Armed.%s Invite the bot:\n' "$B" "$R"
   printf '  %shttps://discord.com/oauth2/authorize?client_id=%s&scope=bot%%20applications.commands%s\n' \
     "$CREAM" "$DISCORD_CLIENT_ID" "$R"
-  printf '\n  Then in Discord:  %s/watch%s  paste a BookMyShow link\n' "$B" "$R"
-  printf '  Subs:               %s/watch%s … %sdate:any%s  (new dates + new cinemas)\n\n' "$B" "$R" "$AMB" "$R"
+  printf '\n  Then in Discord:  %s/watch%s  paste a BookMyShow or District link\n' "$B" "$R"
+  printf '  Subscriptions:    %s/watch%s … %sdate:any%s  (new dates + new cinemas)\n\n' "$B" "$R" "$AMB" "$R"
 }
 
 main "$@"

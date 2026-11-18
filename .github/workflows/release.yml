@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to build and publish (optional)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Pre-Release Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Bun 1.4.2
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-1.4.2-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-1.4.2-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify tag matches package.json version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            PKG_VER="v$(bun -e 'console.log((await Bun.file("package.json").json()).version)')"
+            if [[ "$RELEASE_TAG" != "$PKG_VER" ]]; then
+              echo "::error::Git tag ($RELEASE_TAG) does not match package.json version ($PKG_VER)"
+              exit 1
+            fi
+          fi
+
+      - name: Run full verification suite
+        run: |
+          bash -n install.sh
+          bash -n infra/kuma-heartbeat.sh
+          bun run lint
+          bun run typecheck
+          bun run quality
+          bun run deadcode
+          bun test
+
+  publish:
+    name: Multi-Arch GHCR Image & GitHub Release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      # Enables linux/arm64 builds for Oracle Cloud Ampere A1 alongside linux/amd64.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract OCI metadata & tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
+            type=raw,value=latest,enable=${{ !contains(inputs.tag || github.ref_name, '-') }}
+            type=sha
+
+      - name: Build and push multi-arch image (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create GitHub Release (if not already published)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Skipping GitHub Release creation for non-semver ref: $RELEASE_TAG"
+            exit 0
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists."
+          else
+            PRE_FLAG=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then
+              PRE_FLAG=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${PRE_FLAG[@]}"
+          fi

@@ -1,0 +1,44 @@
+# SeatSniper systemd user service for Oracle Cloud VPS (ubuntu user)
+#
+# Install on Oracle VPS:
+#   mkdir -p ~/.config/systemd/user
+#   cp ~/seatsniper/infra/systemd/seatsniper.service ~/.config/systemd/user/seatsniper.service
+#   sudo loginctl enable-linger "$USER"
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now seatsniper.service
+#
+# Inspect health (check actual poll cycle logs + last_cycle.json, not is-active alone):
+#   systemctl --user status seatsniper.service
+#   tail -f ~/seatsniper/seatsniper.log
+
+[Unit]
+Description=SeatSniper Discord Ticket Monitor (BookMyShow & District)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=900
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/seatsniper
+EnvironmentFile=%h/seatsniper/.env
+Environment=NODE_ENV=production
+Environment=LIVENESS_PATH=%h/seatsniper/last_cycle.json
+UMask=0077
+ExecStart=%h/.bun/bin/bun run src/index.ts
+
+Restart=always
+RestartSec=15s
+KillSignal=SIGTERM
+# Allows graceful SIGTERM drain (10s active poll + 3s Discord gateway + SQLite WAL checkpoint).
+TimeoutStopSec=20s
+
+MemoryMax=400M
+LimitCORE=0
+NoNewPrivileges=yes
+
+StandardOutput=append:%h/seatsniper/seatsniper.log
+StandardError=append:%h/seatsniper/seatsniper.log
+
+[Install]
+WantedBy=default.target

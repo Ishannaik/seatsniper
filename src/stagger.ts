@@ -22,7 +22,7 @@ export type StaggerBounds = { minMs: number; maxMs: number };
  * bot that is otherwise configured, but it must not pass silently either — a bare
  * `Number(process.env.X ?? d)` turns "abc" into NaN and `Bun.sleep(NaN)` is not a stagger.
  */
-export function envNonNegative(
+function envNonNegative(
   name: string,
   fallback: number,
   env: Record<string, string | undefined> = process.env,
@@ -53,7 +53,9 @@ export function staggerBounds(
   const requestedMax = envNonNegative("STAGGER_MS_MAX", DEFAULT_STAGGER_MAX_MS, env, warn);
 
   if (requestedMax < minMs) {
-    warn(`[config] STAGGER_MS_MAX (${requestedMax}) is below STAGGER_MS_MIN (${minMs}) — using ${minMs} for both`);
+    warn(
+      `[config] STAGGER_MS_MAX (${requestedMax}) is below STAGGER_MS_MIN (${minMs}) — using ${minMs} for both`,
+    );
     return { minMs, maxMs: minMs };
   }
   return { minMs, maxMs: requestedMax };
@@ -63,6 +65,9 @@ export function staggerBounds(
  * Uniform delay in [minMs, maxMs). Equals the previous `2000 + Math.random() * 3000` at defaults.
  * @param random must return values in [0, 1), like Math.random; the half-open upper bound depends on it.
  */
-export function staggerDelayMs({ minMs, maxMs }: StaggerBounds, random: () => number = Math.random): number {
+export function staggerDelayMs(
+  { minMs, maxMs }: StaggerBounds,
+  random: () => number = Math.random,
+): number {
   return minMs + random() * (maxMs - minMs);
 }

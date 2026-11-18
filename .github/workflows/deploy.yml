@@ -1,0 +1,289 @@
+name: Deploy (Oracle VPS)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_register_commands:
+        description: "Force Discord slash-command re-registration on deploy"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel an in-flight SSH deploy mid-restart or mid-SQLite backup.
+  group: production-oracle-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Oracle VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check Oracle VPS deployment secrets
+        id: config
+        env:
+          ORACLE_SSH_HOST: ${{ secrets.ORACLE_SSH_HOST }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_OAUTH_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ORACLE_SSH_HOST}" || -z "${ORACLE_SSH_KEY}" ]]; then
+            {
+              echo "### Oracle VPS Deploy Skipped (Secrets Not Configured)"
+              echo ""
+              echo "Configure `ORACLE_SSH_HOST` and `ORACLE_SSH_KEY` in Repository Secrets to enable automated deployment on `main` pushes."
+              echo "See [`docs/ops.md`](docs/ops.md) for the Oracle Cloud VPS deploy-key setup."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "tailscale=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          if [[ -n "${TS_OAUTH_CLIENT_ID}" && -n "${TS_OAUTH_SECRET}" ]]; then
+            echo "tailscale=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tailscale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun 1.4.2
+        if: steps.config.outputs.configured == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Pre-deploy typecheck & test gate
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test
+
+      - name: Connect to Tailscale (optional tailnet SSH path)
+        if: steps.config.outputs.configured == 'true' && steps.config.outputs.tailscale == 'true'
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy over SSH with healthcheck & automatic rollback
+        if: steps.config.outputs.configured == 'true'
+        env:
+          SSH_HOST: ${{ secrets.ORACLE_SSH_HOST }}
+          SSH_USER: ${{ secrets.ORACLE_SSH_USER }}
+          SSH_PORT: ${{ secrets.ORACLE_SSH_PORT }}
+          SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+          APP_DIR: ${{ secrets.ORACLE_APP_DIR }}
+          TARGET_SHA: ${{ github.sha }}
+          FORCE_CMDS: ${{ inputs.force_register_commands || false }}
+        run: |
+          set -euo pipefail
+          SSH_USER="${SSH_USER:-ubuntu}"
+          SSH_PORT="${SSH_PORT:-22}"
+          APP_DIR="${APP_DIR:-/home/ubuntu/seatsniper}"
+
+          umask 077
+          mkdir -p ~/.ssh
+          trap 'rm -f ~/.ssh/id_deploy' EXIT
+          printf '%s\n' "${SSH_KEY}" | tr -d '\r' > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+
+          if [[ -n "${SSH_KNOWN_HOSTS}" ]]; then
+            printf '%s\n' "${SSH_KNOWN_HOSTS}" >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan -T 10 -p "${SSH_PORT}" -H "${SSH_HOST}" >> ~/.ssh/known_hosts
+          fi
+
+          ssh -i ~/.ssh/id_deploy \
+            -p "${SSH_PORT}" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            "${SSH_USER}@${SSH_HOST}" \
+            bash -s -- "${APP_DIR}" "${TARGET_SHA}" "${FORCE_CMDS}" <<'REMOTE_EOF'
+          set -euo pipefail
+
+          APP_DIR="$1"
+          TARGET_SHA="$2"
+          FORCE_CMDS="$3"
+
+          export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+          export PATH="$BUN_INSTALL/bin:$PATH"
+
+          [[ -d "$APP_DIR/.git" ]] || { echo "Missing git checkout at $APP_DIR" >&2; exit 1; }
+          [[ -f "$APP_DIR/.env" ]] || { echo "Missing $APP_DIR/.env on Oracle host" >&2; exit 1; }
+          command -v bun >/dev/null 2>&1 || { echo "bun not found on remote PATH" >&2; exit 1; }
+
+          cd "$APP_DIR"
+          PRE_DEPLOY_SHA="$(git rev-parse HEAD)"
+          DEPLOY_EPOCH="$(date +%s)"
+          echo "[deploy] Current SHA: $PRE_DEPLOY_SHA -> Target SHA: $TARGET_SHA"
+
+          # Resolve SQLite DB path from .env (default: seatsniper.db) and back it up safely.
+          RAW_DB_PATH="$(grep -E '^DB_PATH=' .env | tail -n 1 | cut -d= -f2- | tr -d '\r"' || true)"
+          DB_FILE="${RAW_DB_PATH:-$APP_DIR/seatsniper.db}"
+          if [[ "$DB_FILE" != /* ]]; then
+            DB_FILE="$APP_DIR/$DB_FILE"
+          fi
+          if [[ -f "$DB_FILE" ]]; then
+            if command -v sqlite3 >/dev/null 2>&1; then
+              sqlite3 "$DB_FILE" ".timeout 5000" ".backup '${DB_FILE}.bak'"
+            else
+              cp -p "$DB_FILE" "${DB_FILE}.bak"
+            fi
+            echo "[deploy] Backed up SQLite DB to ${DB_FILE}.bak"
+          fi
+
+          detect_supervisor() {
+            if command -v systemctl >/dev/null 2>&1 && systemctl --user list-unit-files seatsniper.service 2>/dev/null | grep -q seatsniper.service; then
+              if systemctl --user is-active --quiet seatsniper.service || systemctl --user is-enabled --quiet seatsniper.service; then
+                echo "systemd"
+                return
+              fi
+            fi
+            if command -v pm2 >/dev/null 2>&1 && pm2 describe seatsniper >/dev/null 2>&1; then
+              echo "pm2"
+              return
+            fi
+            if command -v docker >/dev/null 2>&1 && docker ps -a --format '{{.Names}}' | grep -qx seatsniper; then
+              echo "docker"
+              return
+            fi
+            echo "none"
+          }
+
+          SUPERVISOR="$(detect_supervisor)"
+          [[ "$SUPERVISOR" != "none" ]] || {
+            echo "No active supervisor found for seatsniper (checked systemd --user, pm2, docker)" >&2
+            exit 1
+          }
+          echo "[deploy] Detected supervisor: $SUPERVISOR"
+
+          restart_service() {
+            case "$SUPERVISOR" in
+              systemd)
+                systemctl --user daemon-reload
+                systemctl --user restart seatsniper.service
+                ;;
+              pm2)
+                pm2 restart seatsniper --update-env
+                pm2 save >/dev/null 2>&1 || true
+                ;;
+              docker)
+                docker compose up -d --build --force-recreate --remove-orphans
+                ;;
+            esac
+          }
+
+          pm2_restarts() {
+            bun -e '
+              const raw = JSON.parse(await new Response(Bun.spawn(["pm2", "jlist"]).stdout).text());
+              const app = raw.find((p) => p.name === "seatsniper");
+              if (!app) process.exit(1);
+              console.log(`${app.pm2_env?.status ?? "unknown"}:${app.pm2_env?.restart_time ?? 0}:${app.pm2_env?.unstable_restarts ?? 0}`);
+            '
+          }
+
+          dump_recent_logs() {
+            echo "--- Recent seatsniper logs ---" >&2
+            case "$SUPERVISOR" in
+              systemd)
+                if [[ -f "$APP_DIR/seatsniper.log" ]]; then
+                  tail -n 40 "$APP_DIR/seatsniper.log" >&2 || true
+                else
+                  journalctl --user -u seatsniper.service -n 40 --no-pager >&2 || true
+                fi
+                ;;
+              pm2)
+                pm2 logs seatsniper --lines 40 --nostream >&2 || true
+                ;;
+              docker)
+                docker logs --tail 40 seatsniper >&2 || true
+                ;;
+            esac
+          }
+
+          rollback() {
+            local reason="$1"
+            echo "[deploy] ERROR: $reason — rolling back to $PRE_DEPLOY_SHA" >&2
+            dump_recent_logs
+            git reset --hard "$PRE_DEPLOY_SHA"
+            bun install --frozen-lockfile
+            if bun pm untrusted 2>/dev/null | grep -vq "Found 0 untrusted"; then
+              bun pm trust --all || true
+            fi
+            restart_service || true
+            exit 1
+          }
+
+          git fetch --depth 50 origin main
+          git checkout -B main "$TARGET_SHA" || git reset --hard "origin/main"
+
+          if ! bun install --frozen-lockfile; then
+            rollback "bun install --frozen-lockfile failed"
+          fi
+          if bun pm untrusted 2>/dev/null | grep -vq "Found 0 untrusted"; then
+            bun pm trust --all || true
+          fi
+
+          if [[ "$FORCE_CMDS" == "true" ]] || { [[ "$PRE_DEPLOY_SHA" != "$(git rev-parse HEAD)" ]] && git diff --name-only "$PRE_DEPLOY_SHA" HEAD -- src/commands.ts src/register.ts | grep -q .; }; then
+            echo "[deploy] Slash command schema changed (or forced); running bun run commands"
+            if ! bun run commands; then
+              rollback "Discord slash command registration failed"
+            fi
+          fi
+
+          if ! restart_service; then
+            rollback "Supervisor restart failed ($SUPERVISOR)"
+          fi
+
+          BASE_RESTARTS=0
+          if [[ "$SUPERVISOR" == "pm2" ]]; then
+            IFS=: read -r _ BASE_RESTARTS _ <<<"$(pm2_restarts)"
+          elif [[ "$SUPERVISOR" == "systemd" ]]; then
+            BASE_RESTARTS="$(systemctl --user show seatsniper.service -p NRestarts --value || echo 0)"
+          fi
+
+          sleep 12
+
+          case "$SUPERVISOR" in
+            systemd)
+              systemctl --user is-active --quiet seatsniper.service || rollback "seatsniper.service not active after 12s"
+              POST_RESTARTS="$(systemctl --user show seatsniper.service -p NRestarts --value || echo 0)"
+              [[ "$POST_RESTARTS" == "$BASE_RESTARTS" ]] || rollback "seatsniper.service crash-restarted ($BASE_RESTARTS -> $POST_RESTARTS)"
+              ;;
+            pm2)
+              IFS=: read -r PM2_STATUS POST_RESTARTS UNSTABLE <<<"$(pm2_restarts || echo dead:999:999)"
+              [[ "$PM2_STATUS" == "online" ]] || rollback "pm2 status is $PM2_STATUS (expected online)"
+              [[ "$POST_RESTARTS" == "$BASE_RESTARTS" && "$UNSTABLE" == "0" ]] || rollback "pm2 process restarted post-boot (restarts: $BASE_RESTARTS -> $POST_RESTARTS, unstable: $UNSTABLE)"
+              ;;
+            docker)
+              RUNNING="$(docker inspect -f '{{.State.Running}}' seatsniper 2>/dev/null || echo false)"
+              RESTARTS="$(docker inspect -f '{{.RestartCount}}' seatsniper 2>/dev/null || echo 99)"
+              [[ "$RUNNING" == "true" && "$RESTARTS" == "0" ]] || rollback "docker container unhealthy (running=$RUNNING, restarts=$RESTARTS)"
+              ;;
+          esac
+
+          # If the initial boot poll already wrote last_cycle.json, verify gateway liveness.
+          CYCLE_FILE="$(dirname "$DB_FILE")/last_cycle.json"
+          if [[ -f "$CYCLE_FILE" ]] && [[ "$(stat -c %Y "$CYCLE_FILE" 2>/dev/null || echo 0)" -ge "$DEPLOY_EPOCH" ]]; then
+            GATEWAY_OK="$(bun -e 'const d = JSON.parse(await Bun.file(process.argv[1]).text()); console.log(d.gatewayReady !== false && d.ok !== false ? "yes" : "no");' "$CYCLE_FILE" 2>/dev/null || echo yes)"
+            [[ "$GATEWAY_OK" == "yes" ]] || rollback "last_cycle.json reported gatewayReady=false"
+          fi
+
+          echo "[deploy] Healthy at $(git rev-parse --short HEAD) under $SUPERVISOR"
+          REMOTE_EOF

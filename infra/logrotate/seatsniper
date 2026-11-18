@@ -1,0 +1,19 @@
+# SeatSniper logrotate rule for Oracle Cloud VPS
+#
+# Install:
+#   sudo cp ~/seatsniper/infra/logrotate/seatsniper /etc/logrotate.d/seatsniper
+#   sudo chmod 0644 /etc/logrotate.d/seatsniper
+#   sudo logrotate -d /etc/logrotate.d/seatsniper
+
+/home/ubuntu/seatsniper/seatsniper.log {
+    su ubuntu ubuntu
+    daily
+    maxsize 25M
+    rotate 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    # Required because systemd append: keeps a single file descriptor open across rotations.
+    copytruncate
+}

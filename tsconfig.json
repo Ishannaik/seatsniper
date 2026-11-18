@@ -4,6 +4,7 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleResolution": "bundler",
+    "moduleDetection": "force",
     "types": ["bun"],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -11,6 +12,7 @@
     "strict": true,
     "skipLibCheck": true,
     "noUncheckedIndexedAccess": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true
   }
 }
