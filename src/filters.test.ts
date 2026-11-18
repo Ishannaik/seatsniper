@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { formatSuggestions, normaliseFormats, normaliseDays, matchesFormat, filterSummary } from "./filters.ts";
+import { formatSuggestions, normaliseFormats, normaliseDays, matchesFormat, filterSummary, dayOfWeek } from "./filters.ts";
 
 test("normaliseFormats uppercases and trims every variant", () => {
   expect(normaliseFormats("ScreenX")).toBe("SCREENX");
@@ -89,4 +89,14 @@ test('format autocomplete suggests PXL and preserves comma-separated selections'
   expect(formatSuggestions('px').map(c => c.value)).toContain('PXL');
   expect(formatSuggestions('PXL, im').map(c => c.value)).toContain('PXL,IMAX');
   expect(formatSuggestions('PXL,').map(c => c.value)).not.toContain('PXL,PXL');
+});
+
+test("dayOfWeek maps a YYYYMMDD code to its weekday", () => {
+  expect(dayOfWeek("20261003")).toBe("sat"); // 3 Oct 2026 is a Saturday
+});
+
+test("dayOfWeek throws on a code that isn't 8 digits instead of returning undefined", () => {
+  expect(() => dayOfWeek("202613")).toThrow("YYYYMMDD");
+  expect(() => dayOfWeek("")).toThrow("YYYYMMDD");
+  expect(() => dayOfWeek("2026-10-03")).toThrow("YYYYMMDD");
 });

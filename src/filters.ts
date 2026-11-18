@@ -22,8 +22,11 @@ export function normaliseDays(raw: string | null): string | null {
   return days.join(",");
 }
 
-/** YYYYMMDD -> "mon"|"tue"|...|"sun" (UTC, host-TZ-independent). */
+/** YYYYMMDD -> "mon"|"tue"|...|"sun" (UTC, host-TZ-independent). Throws on anything that isn't 8 digits. */
 export function dayOfWeek(dateCode: string): string {
+  // Fail where the bad data shows up. Without this, a short code yields NaN parts and
+  // an out-of-range index, so the day filter quietly matches nothing.
+  if (!/^\d{8}$/.test(dateCode)) throw new Error(`dayOfWeek: expected a YYYYMMDD date code, got ${JSON.stringify(dateCode)}`);
   const [y, m, d] = [+dateCode.slice(0, 4), +dateCode.slice(4, 6), +dateCode.slice(6, 8)];
   return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][new Date(Date.UTC(y, m - 1, d)).getUTCDay()]!;
 }
