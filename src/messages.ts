@@ -23,8 +23,8 @@
  *   image      nothing to show that the words don't say.
  */
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
-import type { Show } from "./bms.ts";
-import { prettyDate } from "./bms.ts";
+import type { Show } from "./movie-model.ts";
+import { prettyDate } from "./time-filter.ts";
 
 export const LIVE = 0x2ecc71;
 export const ARMED = 0x4a4d52;
@@ -44,6 +44,23 @@ const bookButton = (url: string) =>
   new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setLabel("Book now").setStyle(ButtonStyle.Link).setURL(url),
   );
+
+/** Session links are public District URLs; opening one does not select or hold a seat. */
+function bookingActions(url: string, shows: Show[]) {
+  const unique = [...new Map(shows.filter((s) => s.bookingUrl).map((s) => [s.bookingUrl!, s])).values()].slice(0, 5);
+  const rows = [bookButton(url)];
+  if (unique.length) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(unique.map((s) =>
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(s.bookingUrl!).setLabel(`${s.showTime} · ${s.venueName}`.slice(0, 80)))));
+  return rows;
+}
+
+function categoryDetails(shows: Show[]): string | null {
+  const lines = [...new Set(shows.flatMap((s) => (s.ticketCategories ?? []).filter((c) => c.available > 0).map((c) => `${s.venueName} · ${c.name}: ₹${c.price}/seat · ${c.available} available`)))];
+  if (!lines.length) return null;
+  let text = "";
+  for (const line of lines.slice(0, 6)) { if ((text + line).length > 850) break; text += line + "\n"; }
+  return text + "Listed prices exclude fees. Counts can change; adjacent seats are not verified.";
+}
 
 /** Up to `limit` distinct slots as native Discord times, localised per reader. */
 function timeList(shows: Show[], limit = 8): string {
@@ -139,11 +156,13 @@ export function ticketsLive(opts: {
       inline: true,
     });
   }
-  return { embeds: [embed], components: [bookButton(opts.url)] };
+  const categories = categoryDetails(opts.shows);
+  if (categories) embed.addFields({ name: "Ticket categories", value: categories });
+  return { embeds: [embed], components: bookingActions(opts.url, opts.shows) };
 }
 
 /** Subscription payoff: dates that weren't on sale last time now are. */
-export function newDates(opts: { title: string; city: string; dates: string[]; url: string; filters?: string | null }) {
+export function newDates(opts: { title: string; city: string; dates: string[]; url: string; filters?: string | null; shows?: Show[] }) {
   const n = opts.dates.length;
   return {
     embeds: [
@@ -158,13 +177,13 @@ export function newDates(opts: { title: string; city: string; dates: string[]; u
         )
         .setTimestamp(),
     ],
-    components: [bookButton(opts.url)],
+    components: opts.shows?.length ? bookingActions(opts.url, opts.shows) : [bookButton(opts.url)],
   };
 }
 
 /** Subscription payoff: venues that weren't listing last time now are. */
 export function newCinemas(opts: {
-  title: string; city: string; venues: { code: string; name: string }[]; url: string; filters?: string | null;
+  title: string; city: string; venues: { code: string; name: string }[]; url: string; filters?: string | null; isEvent?: boolean;
 }) {
   const list = opts.venues.slice(0, 8)
     .map((v) => `**${v.name}** (\`${v.code}\`)`)
@@ -172,7 +191,7 @@ export function newCinemas(opts: {
   const extra = opts.venues.length - Math.min(opts.venues.length, 8);
   const embed = sig(new EmbedBuilder(), "Alert")
     .setColor(LIVE)
-    .setTitle(`${opts.title} — ${opts.venues.length === 1 ? "new cinema" : `${opts.venues.length} new cinemas`}`)
+    .setTitle(`${opts.title} — ${opts.venues.length === 1 ? (opts.isEvent ? "new venue" : "new cinema") : `${opts.venues.length} new ${opts.isEvent ? "venues" : "cinemas"}`}`)
     .setURL(opts.url)
     .setDescription(
       `Now listing in ${titleCase(opts.city)}:\n${list}` +
@@ -187,24 +206,24 @@ export function newCinemas(opts: {
 export function subscriptionAlert(opts: {
   title: string; city: string; dates: string[];
   venues: { code: string; name: string }[]; url: string;
-  filters?: string | null; matchedFormats?: string[];
+  filters?: string | null; matchedFormats?: string[]; isEvent?: boolean; shows?: Show[];
 }) {
   const filterLine = opts.filters ? `\n_Matching your filter: ${opts.filters}${opts.matchedFormats?.length ? ` (found: ${opts.matchedFormats.join(" · ")})` : ""}_` : "";
   if (opts.dates.length && opts.venues.length) {
     const embed = sig(new EmbedBuilder(), "Alert")
       .setColor(LIVE)
-      .setTitle(`${opts.title} — new dates & cinemas`)
+      .setTitle(`${opts.title} — new dates & ${opts.isEvent ? "venues" : "cinemas"}`)
       .setURL(opts.url)
       .setDescription(`Updates in ${titleCase(opts.city)}.` + filterLine)
       .addFields(
         { name: "New dates", value: opts.dates.map(prettyDate).join(" · ") },
         {
-          name: "New cinemas",
+          name: opts.isEvent ? "New venues" : "New cinemas",
           value: opts.venues.slice(0, 8).map((v) => `**${v.name}** (\`${v.code}\`)`).join("\n"),
         },
       )
       .setTimestamp();
-    return { embeds: [embed], components: [bookButton(opts.url)] };
+    return { embeds: [embed], components: opts.shows?.length ? bookingActions(opts.url, opts.shows) : [bookButton(opts.url)] };
   }
   if (opts.dates.length) return newDates(opts);
   return newCinemas(opts);
@@ -227,12 +246,12 @@ export function armedForDate(opts: { title: string; city: string; date: string; 
   };
 }
 
-export function armedForMovie(opts: { title: string; city: string; openNow: string[]; everyMin: number; filters?: string | null; warning?: string | null }) {
+export function armedForMovie(opts: { title: string; city: string; openNow: string[]; everyMin: number; filters?: string | null; warning?: string | null; isEvent?: boolean }) {
   const e = sig(new EmbedBuilder(), "Watch")
     .setColor(ARMED)
     .setTitle(opts.title)
     .setDescription(
-      `Watching every date in ${titleCase(opts.city)}. You'll get a DM when a new date or cinema ` +
+      `Watching every date in ${titleCase(opts.city)}. You'll get a DM when a new date or ${opts.isEvent ? "venue" : "cinema"} ` +
         `opens, until you stop it.` +
         (opts.filters ? `\nOnly pinging for **${opts.filters}**.` : "") +
         (opts.warning ? `\n${opts.warning}` : ""),
@@ -270,27 +289,30 @@ export function alreadyOnSale(opts: {
   if (fmts.length) {
     e.addFields({ name: fmts.length === 1 ? "Format" : "Formats", value: fmts.slice(0, 6).join(" · "), inline: true });
   }
-  return { embeds: [e], components: [bookButton(opts.url)] };
+  const categories = categoryDetails(opts.shows);
+  if (categories) e.addFields({ name: "Ticket categories", value: categories });
+  return { embeds: [e], components: bookingActions(opts.url, opts.shows) };
 }
 
-export function watchList(rows: { id: number; title: string; city: string; date: string; fail_count: number; last_ok_at: number | null; format_filter?: string | null; day_filter?: string | null; theatre_filter?: string | null }[]) {
+export function watchList(rows: { id: number; title: string; city: string; date: string; fail_count: number; last_ok_at: number | null; format_filter?: string | null; day_filter?: string | null; theatre_filter?: string | null; provider?: "bms" | "district"; seat_count?: number | null; seat_budget?: number | null }[]) {
   const body = rows
     .map((w) => {
       // The failing branch keeps its last-ok time. That is the one state where someone
       // actually needs it: "I can't read BookMyShow" alone does not say whether the watch
       // ever worked, so a reader cannot tell a watch that broke ten minutes ago from one
       // that never got off the ground. Same relative timestamp, no extra line.
+      const source = w.provider === "district" ? "District" : "BookMyShow";
       const state =
         w.fail_count >= 3 ?
-          w.last_ok_at ? `can't read BookMyShow · last checked <t:${w.last_ok_at}:R>`
-          : "can't read BookMyShow · never checked"
+          w.last_ok_at ? `can't read ${source} · last checked <t:${w.last_ok_at}:R>`
+          : `can't read ${source} · never checked`
         : w.last_ok_at ? `checked <t:${w.last_ok_at}:R>`
         : "not checked yet";
       const what = w.date === "" ? "every new date or cinema" : prettyDate(w.date);
       const filt = (w.format_filter || w.theatre_filter || w.day_filter)
         ? `\n🎯 ${[w.format_filter, w.theatre_filter, w.day_filter].filter(Boolean).join(" · ")}`
         : "";
-      return `**${w.title}** — ${what}\n${titleCase(w.city)} · ${state} · \`/stop id:${w.id}\`${filt}`;
+      return `**${w.title}** — ${what}\n${titleCase(w.city)} · ${source} · ${state} · \`/stop id:${w.id}\`${filt}${w.seat_count != null ? `\n${w.seat_count} seats in one category; adjacency unchecked` : ""}${w.seat_budget != null ? ` · up to ₹${w.seat_budget}/seat before fees` : ""}`;
     })
     .join("\n\n");
   return {
@@ -299,12 +321,12 @@ export function watchList(rows: { id: number; title: string; city: string; date:
 }
 
 /** Something is wrong with SeatSniper. Say what, and what it does NOT mean. */
-export function cannotRead(opts: { title: string; error: string }) {
+export function cannotRead(opts: { title: string; error: string; provider?: string }) {
   return {
     embeds: [
       sig(new EmbedBuilder(), "Problem")
         .setColor(ALARM)
-        .setTitle("I can't read BookMyShow right now")
+        .setTitle(`I can't read ${opts.provider ?? "BookMyShow"} right now`)
         .setDescription(
           `Three checks in a row failed for **${opts.title}**, so I can't tell you whether ` +
             "it's on sale.\n\n**This is a fault on my side, not a “no tickets” answer.** " +
@@ -328,9 +350,9 @@ export function help() {
         .setColor(ARMED)
         .setTitle("Get a DM the moment tickets go on sale")
         .setDescription(
-          "Open the movie on BookMyShow, copy the link from your browser or the " +
+          "Open the movie on BookMyShow or District, copy the link from your browser or the " +
             "**Share** button, and paste it below. The link carries the city, so " +
-            "you'll get your own city's theatres.",
+            "you'll get your own city's theatres. District movie links must include -in-<city>-MV…. Event links use /events/<event>-buy-tickets. Dining is not supported.",
         )
         .addFields(
           {
@@ -358,13 +380,21 @@ export function help() {
               "alerts._",
           },
           {
+            name: "Seat count and budget",
+            value: "District movies: `/watch link:<paste> seats:2 budget:500`. Budget is the listed INR price per seat before fees. Counts must fit one ticket category; rows and adjacency are not checked. Show buttons open District for you to select seats and pay.",
+          },
+          {
+            name: "District events",
+            value: "Paste an event's full District link into `/watch`. Use `date:any` for new ticket dates, or choose one date. Day/time filters work; `theatre:` matches the venue. Cinema formats do not apply. Registration and restricted presales do not count as tickets on sale.",
+          },
+          {
             name: "Manage",
             value: "`/list` — what you're watching\n`/stop id:3` — stop one",
           },
           {
             name: "Limits",
             value:
-              "Observes and notifies only — never buys or holds seats. " +
+              "Alert watches only observe and notify. Personal `/book` supports District holds and booking after separate confirmations. " +
               "Self-hosting requires a host that can complete Safari TLS to BookMyShow; free serverless tiers are not guaranteed to work.",
           },
         )

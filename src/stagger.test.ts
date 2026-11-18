@@ -92,3 +92,11 @@ test("staggerDelayMs stays inside its bounds across many draws", () => {
     expect(delay).toBeLessThan(400);
   }
 });
+
+test("staggerDelayMs returns exactly minMs when random() is 0", () => {
+  expect(staggerDelayMs({ minMs: 2000, maxMs: 5000 }, () => 0)).toBe(2000);
+});
+
+test("staggerDelayMs stays strictly below maxMs at the top of random()'s [0, 1) range", () => {
+  expect(staggerDelayMs({ minMs: 2000, maxMs: 5000 }, () => 0.999999)).toBeLessThan(5000);
+});

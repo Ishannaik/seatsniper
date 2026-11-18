@@ -1,0 +1,53 @@
+{
+  "movie": {
+    "id": "176276",
+    "name": "Ramayana",
+    "languages": [
+      "Hindi",
+      "Tamil",
+      "Telugu",
+      "Kannada",
+      "Malayalam",
+      "English"
+    ],
+    "genres": [
+      "Epic",
+      "Mythological"
+    ],
+    "certification": "U",
+    "duration": "3h 15m"
+  },
+  "date": "2026-11-19",
+  "cinemas": [
+    {
+      "id": "1067732",
+      "name": "Maxus Cinemas, Saki Naka",
+      "address": "90 Feet Road, Sakinaka Andheri(East), Opposite Jarimari Bus Stop, Mumbai, Maharashtra 400072, India",
+      "distance_km": 2.9,
+      "sessions": [
+        {
+          "id": "187678",
+          "start_time": "2026-11-19T07:45:00+05:30",
+          "language": "Hindi",
+          "format": "2D",
+          "screen": "SCREEN 4",
+          "premium_label": "DOLBY 5.1",
+          "min_price": 99,
+          "max_price": 99,
+          "available_seats": 100
+        },
+        {
+          "id": "187658",
+          "start_time": "2026-11-19T09:00:00+05:30",
+          "language": "Hindi",
+          "format": "2D",
+          "screen": "SCREEN 1",
+          "premium_label": "DOLBY 5.1",
+          "min_price": 99,
+          "max_price": 199,
+          "available_seats": 200
+        }
+      ]
+    }
+  ]
+}
