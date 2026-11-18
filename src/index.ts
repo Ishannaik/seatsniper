@@ -15,13 +15,14 @@ import {
   seenDates, recordSeenDates, seenVenues, recordSeenVenues, shouldSilentSeedVenues,
   isSubscription, SUBSCRIPTION, MAX_WATCHES_PER_USER, type Watch,
 } from "./db.ts";
-import { parseTimeFilter, matchesTimeFilter, isRealDateCode, todayIST } from "./time-filter.ts";
+import { parseTimeFilter, matchesTimeFilter, todayIST } from "./time-filter.ts";
 import {
   normaliseFormats, normaliseDays, matchesFormat,
   matchesDay, matchesTheatre, normaliseTheatres, filterSummary,
 } from "./filters.ts";
 import { commandSuggestions } from "./commands.ts";
 import { staggerBounds, staggerDelayMs } from "./stagger.ts";
+import { normaliseDate } from "./date.ts";
 
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) throw new Error("DISCORD_TOKEN missing — copy .env.example to .env");
@@ -34,16 +35,6 @@ const STAGGER = staggerBounds();
 /** Optional Uptime Kuma Push URL. Bot pings it after each poll so Kuma can alert if we die. */
 const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL?.trim() || "";
 
-
-/** "2026-07-30" | "20260730" -> "20260730". Throws on anything else. */
-function normaliseDate(input: string): string {
-  const d = input.trim().replace(/[-/]/g, "");
-  if (!/^\d{8}$/.test(d)) throw new BmsError("bad_url", `Date must look like 2026-07-30, got "${input}"`);
-  if (!isRealDateCode(d)) {
-    throw new BmsError("bad_url", `"${input}" isn't a real date.`);
-  }
-  return d;
-}
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
