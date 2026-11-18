@@ -4,7 +4,7 @@ FROM oven/bun:1.4.2 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production && \
-    if bun pm untrusted 2>/dev/null | grep -vq "Found 0 untrusted"; then bun pm trust --all; fi
+    (bun pm trust --all 2>/dev/null || true)
 
 FROM oven/bun:1.4.2 AS runtime
 LABEL org.opencontainers.image.source="https://github.com/Ishannaik/seatsniper" \
