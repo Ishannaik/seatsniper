@@ -59,7 +59,10 @@ export function staggerBounds(
   return { minMs, maxMs: requestedMax };
 }
 
-/** Uniform delay in [minMs, maxMs). Equals the previous `2000 + Math.random() * 3000` at defaults. */
+/**
+ * Uniform delay in [minMs, maxMs). Equals the previous `2000 + Math.random() * 3000` at defaults.
+ * @param random must return values in [0, 1), like Math.random; the half-open upper bound depends on it.
+ */
 export function staggerDelayMs({ minMs, maxMs }: StaggerBounds, random: () => number = Math.random): number {
   return minMs + random() * (maxMs - minMs);
 }
