@@ -30,7 +30,16 @@ describe("parseTimeFilter and istToEpoch", () => {
   });
 
   test("rejects invalid times", () => {
-    for (const invalid of ["6:00", "25:00", "12:60", "13:00 PM", "13pm", "0am", "tomorrow"]) {
+    for (const invalid of [
+      "6:00",
+      "24:00",
+      "25:00",
+      "12:60",
+      "13:00 PM",
+      "13pm",
+      "0am",
+      "tomorrow",
+    ]) {
       expect(parseTimeFilter(invalid)).toBeNull();
     }
   });
